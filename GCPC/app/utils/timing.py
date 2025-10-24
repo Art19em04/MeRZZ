@@ -11,7 +11,6 @@ def ns_to_ms(ns):
 class Tick:
     t_frame_in: int = 0
     t_landmarks: int = 0
-    t_classify: int = 0
     t_decision: int = 0
     t_os_event: int = 0
 

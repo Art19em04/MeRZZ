@@ -54,8 +54,6 @@
   "hud": {
     "enabled": true
   },
-
-  "tracker": "cuda_onnx",
   "models": {
     "hand_landmark": "models/hand_landmarker.onnx",
     "palm_detector": "models/palm_detection.onnx"

@@ -6,10 +6,12 @@ INDEX_TIP = 8
 WRIST = 0
 INDEX_MCP = 5
 
+
 class ClutchState(Enum):
     IDLE = 0
     ARMED = 1
     WINDOW = 2
+
 
 class PinchClutch:
     def __init__(self, cfg):
@@ -19,11 +21,9 @@ class PinchClutch:
         self.hold_ms = ccfg.get("hold_ms", 80)
         self.window_ms = ccfg.get("window_ms", 2500)
         self.state = ClutchState.IDLE
-        self.state_ts = 0  # ms
-        self.last_toggle_ts = 0
+        self.state_ts = 0
 
     def _norm_dist(self, pts):
-        # Normalize by index MCP to wrist distance (hand size proxy)
         wrist = pts[WRIST][:2]
         imcp = pts[INDEX_MCP][:2]
         hand_size = np.linalg.norm(imcp - wrist) + 1e-6
@@ -39,12 +39,10 @@ class PinchClutch:
                 self.state_ts = t_ms
         elif self.state == ClutchState.ARMED:
             if d >= self.open_thr:
-                # aborted
                 self.state = ClutchState.IDLE
-            else:
-                if t_ms - self.state_ts >= self.hold_ms:
-                    self.state = ClutchState.WINDOW
-                    self.state_ts = t_ms
+            elif t_ms - self.state_ts >= self.hold_ms:
+                self.state = ClutchState.WINDOW
+                self.state_ts = t_ms
         elif self.state == ClutchState.WINDOW:
             if t_ms - self.state_ts > self.window_ms or d >= self.open_thr:
                 self.state = ClutchState.IDLE
