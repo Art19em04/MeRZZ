@@ -44,7 +44,7 @@ def main():
         fps_acc = fps_alpha * inst_fps + (1 - fps_alpha) * fps_acc
 
         tick = Tick(t_frame_in=t)
-        timestamp_ms = int(time.time() * 1000)
+        timestamp_ms = int(time.monotonic() * 1000)
 
         res = tracker.process(frame, timestamp_ms)
         if res:
