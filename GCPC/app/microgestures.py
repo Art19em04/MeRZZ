@@ -38,6 +38,11 @@ class MicroGestureDetector:
             cooldown_ms=gcfg["cooldown_ms"]
         )
         self.buf = deque(maxlen=24)  # ~ at 120fps equals 200ms window; scale with actual fps
+        # thresholds from config (with sane defaults)
+        gparams = cfg.get("gesture", {})
+        self.thr_swipe = float(gparams.get("thr_swipe", 0.28))
+        self.thr_tapz = float(gparams.get("thr_tapz", 0.06))
+
         self.last_ts = 0
         self.last_fire = 0
 
@@ -89,19 +94,19 @@ class MicroGestureDetector:
         score_fwd = max(0.0, -dz)  # к камере
         score_back = max(0.0, dz)  # от камеры
 
-        THR_SWIPE = 0.28
-        THR_TAPZ = 0.06
+        THR_SWIPE = self.thr_swipe
+        THR_TAPZ = self.thr_tapz
 
         cand = G.NONE;
         conf = 0.0
         if score_up > THR_SWIPE and score_up > score_down and score_up > score_fwd and score_up > score_back:
-            cand, conf = G.SWIPE_UP, min(1.0, score_up)
+            cand, conf = G.SWIPE_UP, max(0.0, min(1.0, (score_up - THR_SWIPE) / max(1e-6, THR_SWIPE*1.6)))
         elif score_down > THR_SWIPE and score_down > score_up and score_down > score_fwd and score_down > score_back:
-            cand, conf = G.SWIPE_DOWN, min(1.0, score_down)
+            cand, conf = G.SWIPE_DOWN, max(0.0, min(1.0, (score_down - THR_SWIPE) / max(1e-6, THR_SWIPE*1.6)))
         elif score_fwd > THR_TAPZ and score_fwd > score_back and score_fwd > score_up and score_fwd > score_down:
-            cand, conf = G.TAP_FORWARD, min(1.0, score_fwd * 2)
+            cand, conf = G.TAP_FORWARD, max(0.0, min(1.0, (score_fwd - THR_TAPZ) / max(1e-6, THR_TAPZ*2.0)))
         elif score_back > THR_TAPZ and score_back > score_fwd and score_back > score_up and score_back > score_down:
-            cand, conf = G.TAP_BACK, min(1.0, score_back * 2)
+            cand, conf = G.TAP_BACK, max(0.0, min(1.0, (score_back - THR_TAPZ) / max(1e-6, THR_TAPZ*2.0)))
 
         if cand != G.NONE and conf >= self.cfg.conf_min:
             self.last_fire = t_ms

@@ -1,140 +1,129 @@
-import sys, subprocess, time, platform
+# app/os_events.py
+import sys, time
+import ctypes
+from ctypes import wintypes
 
-# Key mapping: list like ["CTRL","C"] → platform-specific synth
+# --- Windows only ---
+IS_WIN = sys.platform.startswith("win")
 
-def send_keys(keys):
-    sysname = platform.system().lower()
-    if "windows" in sysname:
-        return _win_send(keys)
-    elif "darwin" in sysname:
+if IS_WIN:
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+    # В ctypes.wintypes нет ULONG_PTR → объявляем безопасно для x86/x64.
+    if not hasattr(wintypes, "ULONG_PTR"):
         try:
-            return _mac_quartz(keys)
+            # частая практика: алиаснуть к WPARAM (pointer-sized unsigned)
+            wintypes.ULONG_PTR = wintypes.WPARAM
         except Exception:
-            return _mac_osascript(keys)
-    else:
-        # Assume Linux
-        if _is_wayland():
-            return _linux_ydotool(keys) or _linux_xdotool(keys)
-        else:
-            return _linux_xdotool(keys)
+            # запасной путь по размеру указателя
+            wintypes.ULONG_PTR = ctypes.c_ulonglong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_ulong
 
-def _is_wayland():
-    import os
-    return os.environ.get("XDG_SESSION_TYPE","").lower() == "wayland"
+    # Константы SendInput
+    INPUT_MOUSE = 0
+    INPUT_KEYBOARD = 1
+    INPUT_HARDWARE = 2
 
-# --- Windows via SendInput ---
-def _win_send(keys):
-    import ctypes
-    from ctypes import wintypes
+    KEYEVENTF_KEYUP     = 0x0002
+    KEYEVENTF_SCANCODE  = 0x0008
+    KEYEVENTF_EXTENDEDKEY = 0x0001
 
+    # Определения структур из winuser.h / MSDN (см. KEYBDINPUT)
+    # https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-keybdinput
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = (
+            ("wVk",       wintypes.WORD),
+            ("wScan",     wintypes.WORD),
+            ("dwFlags",   wintypes.DWORD),
+            ("time",      wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        )
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = (
+            ("dx",        wintypes.LONG),
+            ("dy",        wintypes.LONG),
+            ("mouseData", wintypes.DWORD),
+            ("dwFlags",   wintypes.DWORD),
+            ("time",      wintypes.DWORD),
+            ("dwExtraInfo", wintypes.ULONG_PTR),
+        )
+
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = (
+            ("uMsg",    wintypes.DWORD),
+            ("wParamL", wintypes.WORD),
+            ("wParamH", wintypes.WORD),
+        )
+
+    class _INPUTunion(ctypes.Union):
+        _fields_ = (
+            ("ki", KEYBDINPUT),
+            ("mi", MOUSEINPUT),
+            ("hi", HARDWAREINPUT),
+        )
+
+    class INPUT(ctypes.Structure):
+        _anonymous_ = ("_iu",)
+        _fields_ = (
+            ("type", wintypes.DWORD),
+            ("_iu",  _INPUTunion),
+        )
+
+    LPINPUT = ctypes.POINTER(INPUT)
+
+    # Прототип SendInput
+    user32.SendInput.argtypes = (wintypes.UINT,  # nInputs
+                                 LPINPUT,        # pInputs
+                                 ctypes.c_int)   # cbSize
+    user32.SendInput.restype  = wintypes.UINT
+
+    # Простая карта имён → VK (для букв/цифр берём ord)
     VK = {
-        "CTRL": 0x11, "ALT": 0x12, "SHIFT": 0x10,
+        "CTRL": 0x11, "SHIFT": 0x10, "ALT": 0x12, "WIN": 0x5B,
+        "ENTER": 0x0D, "ESC": 0x1B, "TAB": 0x09, "SPACE": 0x20,
+        "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28,
         "C": 0x43, "V": 0x56, "X": 0x58, "Z": 0x5A,
     }
 
-    INPUT_KEYBOARD = 1
-    KEYEVENTF_KEYUP = 0x0002
+    def _vk_of(token: str) -> int:
+        t = token.upper()
+        if len(t) == 1:
+            return ord(t)  # для A..Z, 0..9 VK совпадает с ASCII
+        return VK.get(t, 0)
 
-    class KEYBDINPUT(ctypes.Structure):
-        _fields_ = [("wVk", wintypes.WORD),
-                    ("wScan", wintypes.WORD),
-                    ("dwFlags", wintypes.DWORD),
-                    ("time", wintypes.DWORD),
-                    ("dwExtraInfo", wintypes.ULONG_PTR)]
+    def _send_vk(vk: int, keyup: bool=False):
+        flags = KEYEVENTF_KEYUP if keyup else 0
+        ki = KEYBDINPUT(wVk=vk, wScan=0, dwFlags=flags, time=0, dwExtraInfo=0)
+        inp = INPUT(type=INPUT_KEYBOARD, ki=ki)
+        n = user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+        if n != 1:
+            raise ctypes.WinError(ctypes.get_last_error())
 
-    class INPUT(ctypes.Structure):
-        _fields_ = [("type", wintypes.DWORD),
-                    ("ki", KEYBDINPUT)]
+    def _press_combo(tokens):
+        # модификаторы удерживаем, последнюю клавишу кликаем
+        mods = [t for t in tokens[:-1]]
+        main = tokens[-1]
+        for m in mods:
+            _send_vk(_vk_of(m), keyup=False)
+        _send_vk(_vk_of(main), keyup=False)
+        _send_vk(_vk_of(main), keyup=True)
+        for m in reversed(mods):
+            _send_vk(_vk_of(m), keyup=True)
 
-    SendInput = ctypes.windll.user32.SendInput
+    def send_keys(tokens):
+        """
+        tokens: список строк, напр. ["CTRL","C"] или ["CTRL","SHIFT","Z"]
+        """
+        if not tokens:
+            return
+        try:
+            _press_combo(tokens)
+        except Exception as e:
+            # fallback: небольшая задержка и повтор
+            time.sleep(0.01)
+            _press_combo(tokens)
 
-    def key_event(vk, down=True):
-        inp = INPUT()
-        inp.type = INPUT_KEYBOARD
-        inp.ki = KEYBDINPUT(VK.get(vk, 0), 0, 0 if down else KEYEVENTF_KEYUP, 0, 0)
-        SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
-
-    mods = [k for k in keys if k in ("CTRL","ALT","SHIFT")]
-    rest = [k for k in keys if k not in mods]
-    # press mods
-    for m in mods:
-        key_event(m, True)
-    for r in rest:
-        key_event(r, True)
-        key_event(r, False)
-    for m in reversed(mods):
-        key_event(m, False)
-    return True
-
-# --- macOS Quartz ---
-def _mac_quartz(keys):
-    from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGAnnotatedSessionEventTap, kCGEventFlagMaskShift, kCGEventFlagMaskControl, kCGEventFlagMaskAlternate
-    import Quartz
-    import AppKit
-
-    # Map simple ASCII to virtual keycodes
-    VKEY = {
-        "C": 8, "V": 9, "X": 7, "Z": 6,
-    }
-    mods = [k for k in keys if k in ("CTRL","ALT","SHIFT")]
-    rest = [k for k in keys if k not in mods]
-    flags = 0
-    if "SHIFT" in mods: flags |= kCGEventFlagMaskShift
-    if "CTRL" in mods: flags |= kCGEventFlagMaskControl
-    if "ALT" in mods: flags |= kCGEventFlagMaskAlternate
-
-    for r in rest:
-        ev_down = CGEventCreateKeyboardEvent(None, VKEY.get(r, 0), True)
-        ev_up   = CGEventCreateKeyboardEvent(None, VKEY.get(r, 0), False)
-        if flags:
-            Quartz.CGEventSetFlags(ev_down, flags)
-            Quartz.CGEventSetFlags(ev_up, flags)
-        CGEventPost(kCGAnnotatedSessionEventTap, ev_down)
-        CGEventPost(kCGAnnotatedSessionEventTap, ev_up)
-    return True
-
-# macOS fallback with osascript
-def _mac_osascript(keys):
-    apples = []
-    mods = [k for k in keys if k in ("CTRL","ALT","SHIFT")]
-    rest = [k for k in keys if k not in mods]
-    modmap = {"CTRL":"control down", "ALT":"option down", "SHIFT":"shift down"}
-    for r in rest:
-        mods_clause = " using {" + ", ".join(modmap[m] for m in mods) + "}" if mods else ""
-        apples.append(f'tell application "System Events" to keystroke "{r.lower()}"{mods_clause}')
-    script = " & ".join(f'"{a}"' for a in apples)
-    cmd = f'osascript -e {script}'
-    subprocess.call(cmd, shell=True)
-    return True
-
-# Linux X11
-def _linux_xdotool(keys):
-    # convert to xdotool syntax
-    kmap = {"CTRL":"ctrl", "ALT":"alt", "SHIFT":"shift"}
-    seq = []
-    for k in keys:
-        if k in kmap:
-            seq.append(kmap[k])
-        else:
-            seq.append(k.lower())
-    combo = "+".join(seq)
-    try:
-        subprocess.check_call(["xdotool", "key", combo])
-        return True
-    except Exception:
-        return False
-
-# Linux Wayland
-def _linux_ydotool(keys):
-    combo = []
-    kmap = {"CTRL":"leftctrl", "ALT":"leftalt", "SHIFT":"leftshift"}
-    for k in keys:
-        if k in kmap:
-            combo.append(kmap[k])
-        else:
-            combo.append(k.lower())
-    try:
-        subprocess.check_call(["ydotool", "key"] + combo)
-        return True
-    except Exception:
-        return False
+else:
+    # Для не-Windows просто глушим (или реализуем X11/Wayland отдельно)
+    def send_keys(tokens):
+        return
