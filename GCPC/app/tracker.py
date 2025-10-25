@@ -218,9 +218,6 @@ class HandTracker:
             crop = frame_bgr[y0:y1, x0:x1]
             det_conf = 1e-3
 
-        if self.det_sess is not None and det_conf < self.min_det_conf:
-            return None
-
         inp = self._prep(crop, crop.shape[0], crop.shape[1], self.lmk_nchw, self.lmk_h, self.lmk_w)
         out = self.lmk_sess.run(None, {self.lmk_in: inp})
         pts = self._post_landmarks(out)

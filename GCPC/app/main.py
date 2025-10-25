@@ -95,7 +95,7 @@ def main():
         timestamp_ms = int(time.monotonic() * 1000)
 
         res = tracker.process(frame, timestamp_ms)
-        if not res or (res.score < cfg["tracker_opts"].get("min_det_conf", 0.5)):
+        if not res:
             cstate = ClutchState.IDLE
             decision = detector.update(None, timestamp_ms, False)
         else:
