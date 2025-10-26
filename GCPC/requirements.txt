@@ -1,5 +1,5 @@
-numpy>=1.24
-opencv-python>=4.8
-pydantic>=2
-platformdirs>=4
-PyObjC>=10; sys_platform == 'darwin'
+opencv-python
+mediapipe
+PySide6
+numpy
+onnxruntime-gpu

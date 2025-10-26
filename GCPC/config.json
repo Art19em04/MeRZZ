@@ -1,76 +1,57 @@
 {
+  "backend": "mediapipe",
+  "onnx_landmarks": true,
+  "detector": {
+    "backend": "mediapipe",
+    "min_detection_confidence": 0.6,
+    "min_tracking_confidence": 0.5,
+    "max_num_hands": 2,
+    "model_complexity": 1
+  },
+  "dominant_hand": "right",
   "video": {
-    "roi": [
-      0.15,
-      0.25,
-      0.7,
-      0.6
-    ],
-    "camera_index": 1,
-    "width": 640,
-    "height": 360,
-    "fps_min": 60,
-    "exposure_auto": true,
-    "camera_backend": "msmf"
+    "camera_index": 0,
+    "width": 1280,
+    "height": 720,
+    "mirror": true
   },
-  "gesture": {
-    "conf_min": 0.5,
-    "min_duration_ms": 100,
-    "max_duration_ms": 600,
-    "cooldown_ms": 250,
-    "thr_swipe": 0.22,
-    "thr_tapz": 0.05
+  "sounds": {
+    "on_toggle": false,
+    "on_commit": false,
+    "on_send": false
   },
-  "clutch": {
-    "type": "pinch",
-    "window_ms": 2500,
-    "pinch_open": 0.3,
-    "pinch_close": 0.22,
-    "hold_ms": 80
+  "gesture_engine": {
+    "clutch": "none",
+    "cooldown_ms": 420,
+    "pinch_threshold": 0.045,
+    "fist_threshold": 0.35,
+    "thumbs_up_thumb_max_flex": 0.35,
+    "thumbs_up_others_min_flex": 0.5,
+    "point_index_max_flex": 0.3,
+    "point_others_min_flex": 0.5,
+    "swipe_speed_px": 900
   },
-  "mapping": {
-    "swipe_up": [
-      "CTRL",
-      "C"
-    ],
-    "swipe_down": [
-      "CTRL",
-      "V"
-    ],
-    "tap_forward": [
-      "CTRL",
-      "X"
-    ],
-    "tap_back": [
-      "CTRL",
-      "Z"
-    ]
+  "sequence": {
+    "arm_delay_ms": 420,
+    "refractory_ms": 1100,
+    "no_repeat_ms": 650,
+    "cancel_on_hand_exit_ms": 900,
+    "auto_exit_on_hand_exit": true,
+    "max_len": 6,
+    "exit_on_commit": true
   },
-  "telemetry": {
-    "log_level": "info",
-    "dir": "logs",
-    "file_prefix": "session"
+  "bimanual": {
+    "confirm_dwell_ms": 220,
+    "confirm_refractory_ms": 700,
+    "undo_window_ms": 900,
+    "commit_dwell_ms": 260,
+    "commit_refractory_ms": 1200
   },
-  "hud": {
-    "enabled": true
-  },
-
-  "tracker": "cuda_onnx",
-  "models": {
-    "hand_landmark": "models/hand_landmarker.onnx",
-    "palm_detector": "models/palm_detection.onnx"
-  },
- "tracker_opts": {
-    "det_every": 5,
-    "min_det_conf": 0.50,
-    "presence_high": 0.80,
-    "presence_low": 0.60,
-    "k_enter": 2,
-    "k_exit": 2,
-    "min_box_area": 0.015,
-    "pad_scale": 1.3,
-    "lost_grace_frames": 1,
-    "z_div": 80.0,
-    "z_dir": -1
+  "sequence_mappings": {
+    "POINT+FIST": "CTRL+ALT+T",
+    "OPEN_PALM+FIST": "ALT+F4",
+    "PINCH_TAP": "CTRL+C",
+    "PINCH_HOLD": "CTRL+V",
+    "SWIPE_LEFT+SWIPE_RIGHT": "ALT+TAB"
   }
 }
