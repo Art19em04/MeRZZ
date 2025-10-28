@@ -14,8 +14,12 @@ pip install -r requirements.txt
 ```
 (Для MediaPipe на Windows нужен пакет `mediapipe`).
 
-## Модель
-* По умолчанию используется **MediaPipe Hands** (модели идут внутри пакета). CUDA‑эксперименты с оннх‑лэндмарками оставлены в `tracker_onnx.py`, но требуют **отдельного детектора**.
+## Модель / выбор backend
+* По умолчанию используется **MediaPipe Hands** (модели идут внутри пакета).
+* Чтобы задействовать ONNX + CUDA, положи модели в `GCPC/models` или укажи абсолютные пути в `config.json` и выставь `"backend": "onnx"`.
+  * `onnx.detector_model` — детектор ладоней (формат `[x1,y1,x2,y2,score,cls]`).
+  * `onnx.landmark_model` — регрессор 21 точек. В консоли появится `[DET]/[LMK] Активен CUDAExecutionProvider ...`.
+  * Если нужна только оннх-модель лэндмарков без детектора, выставь `"backend": "onnx_landmarks"`.
 
 ## CUDA / ONNXRuntime
 * Для GPU-версии установи `onnxruntime-gpu` и драйверы CUDA. При запуске onnx-моделей в консоль теперь выводится активный провайдер (`[ONNX] Активен CUDAExecutionProvider ...`).

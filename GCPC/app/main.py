@@ -5,6 +5,8 @@ from app.gestures import GestureState
 from app.os_events_win import press_combo
 from app.osd import OSD
 from app.tracker_mediapipe import MediaPipeHandTracker
+from app.tracker_two_stage import TwoStageHandTracker
+from app.tracker_onnx import ONNXHandTracker
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(APP_DIR)
 
@@ -49,17 +51,67 @@ def draw_landmarks(frame, lm):
     for (x,y) in lm: 
         cv2.circle(frame,(int(x*w),int(y*h)),3,(0,255,0),-1)
 
+def _resolve_path(base_dir, path_value):
+    if not path_value:
+        return None
+    if os.path.isabs(path_value):
+        return path_value
+    return os.path.join(base_dir, path_value)
+
+
+def _make_tracker(cfg):
+    backend = str(cfg.get("backend", "mediapipe")).strip().lower()
+
+    if backend == "mediapipe":
+        dcfg = cfg.get("detector", {})
+        return MediaPipeHandTracker(
+            min_det=dcfg.get("min_detection_confidence", 0.6),
+            min_trk=dcfg.get("min_tracking_confidence", 0.5),
+            max_hands=dcfg.get("max_num_hands", 2),
+            model_complexity=dcfg.get("model_complexity", 1),
+        )
+
+    models_root = cfg.get("models_dir") or os.path.join(ROOT, "models")
+    models_root = os.path.abspath(models_root)
+
+    if backend == "onnx_landmarks":
+        return ONNXHandTracker(models_dir=models_root)
+
+    if backend in {"onnx", "onnx_two_stage", "two_stage"}:
+        ocfg = cfg.get("onnx", {})
+        det_path = _resolve_path(models_root, ocfg.get("detector_model") or "palm_detection.onnx")
+        lmk_path = _resolve_path(models_root, ocfg.get("landmark_model") or "hand_landmarks.onnx")
+        det_inp = ocfg.get("detector_input_size") or [256, 256]
+        lmk_inp = ocfg.get("landmark_input_size") or [224, 224]
+        max_hands = int(ocfg.get("max_hands", cfg.get("max_hands", 2)))
+        score_th = float(ocfg.get("score_threshold", 0.3))
+        nms_th = float(ocfg.get("nms_threshold", 0.45))
+        presence_th = float(ocfg.get("presence_threshold", 0.35))
+        smooth = bool(ocfg.get("smooth", True))
+        one_euro = ocfg.get("one_euro")
+        return TwoStageHandTracker(
+            det_path,
+            det_inp,
+            lmk_path,
+            lmk_inp,
+            max_hands=max_hands,
+            score_th=score_th,
+            nms_th=nms_th,
+            presence_th=presence_th,
+            smooth=smooth,
+            one_euro=one_euro,
+        )
+
+    raise ValueError(f"Неизвестный backend трекера: {backend}")
+
+
 def main():
     cfg=load_config(); app=QtWidgets.QApplication([]); osd=OSD(); osd.show()
     vcfg=cfg["video"]; idx=int(vcfg.get("camera_index",0)); w=int(vcfg.get("width",1280)); h=int(vcfg.get("height",720)); mirror=bool(vcfg.get("mirror",True))
     cap=open_camera(idx,w,h); 
     if cap is None: raise RuntimeError("Не удалось открыть камеру")
 
-    dcfg=cfg.get("detector",{})
-    tracker = MediaPipeHandTracker(min_det=dcfg.get("min_detection_confidence",0.6),
-                                   min_trk=dcfg.get("min_tracking_confidence",0.5),
-                                   max_hands=dcfg.get("max_num_hands",2),
-                                   model_complexity=dcfg.get("model_complexity",1))
+    tracker = _make_tracker(cfg)
 
     gR=GestureState(cfg["gesture_engine"]); gL=GestureState(cfg["gesture_engine"])
 

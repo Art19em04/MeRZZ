@@ -1,6 +1,17 @@
 {
   "backend": "mediapipe",
-  "onnx_landmarks": true,
+  "models_dir": "models",
+  "onnx": {
+    "detector_model": "palm_detection.onnx",
+    "detector_input_size": [256, 256],
+    "landmark_model": "hand_landmarks.onnx",
+    "landmark_input_size": [224, 224],
+    "max_hands": 2,
+    "score_threshold": 0.3,
+    "nms_threshold": 0.45,
+    "presence_threshold": 0.35,
+    "smooth": true
+  },
   "detector": {
     "backend": "mediapipe",
     "min_detection_confidence": 0.6,
