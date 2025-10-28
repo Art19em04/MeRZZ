@@ -440,6 +440,7 @@ class LandmarkONNX:
         self.out_names = [o.name for o in self.sess.get_outputs()]
         self.smooth = smooth
         self.filters = [OneEuro(**(one_euro_cfg or {"min_cutoff":1.2,"beta":0.025})) for _ in range(21*2)]
+        self._warned_range = False
 
     def _pre(self, crop):
         if crop.shape[0] != self.in_h or crop.shape[1] != self.in_w:
@@ -449,12 +450,19 @@ class LandmarkONNX:
         x = np.transpose(x,(2,0,1))[None,...]
         return x
 
-    @staticmethod
-    def _norm_coord(v):
-        v = float(v)
-        if v < -0.01 or v > 1.01:
-            return float(np.clip((v + 1.0) * 0.5, 0.0, 1.0))
-        return float(np.clip(v, 0.0, 1.0))
+    def _normalize_pts(self, pts):
+        arr = np.array(pts, dtype=np.float32)
+        if arr.ndim != 2 or arr.shape[0] == 0:
+            return None
+        raw_min = float(np.min(arr))
+        raw_max = float(np.max(arr))
+        if raw_min < -0.1 or raw_max > 1.1:
+            arr = (arr + 1.0) * 0.5
+            if not self._warned_range:
+                print("[LMK] Выход landmark-модели в диапазоне [-1,1] — конвертируем к [0,1]")
+                self._warned_range = True
+        arr = np.clip(arr, 0.0, 1.0)
+        return arr
 
     def _warp_roi(self, rgb, roi):
         cx, cy = roi.get("center", (0.0, 0.0))
@@ -488,23 +496,45 @@ class LandmarkONNX:
         H,W = hm.shape; idx = int(np.argmax(hm)); y,x = divmod(idx, W); v = float(hm[y,x])
         return (x/(W-1 if W>1 else 1), y/(H-1 if H>1 else 1), v)
 
-    def _parse(self, y):
-        y=y[0]
-        pts=None; conf=1.0
-        if y.ndim==3 and y.shape[0]==1 and y.shape[1]==21 and y.shape[2] in (2,3):
-            pts = [(float(y[0,i,0]), float(y[0,i,1])) for i in range(21)]
-            if y.shape[2]==3: conf=float(np.mean(np.clip(y[0,:,2],0,1)))
-        elif y.ndim==2 and y.shape[0]==1 and y.shape[1] in (42,63):
-            has_z=(y.shape[1]==63); flat=y.reshape(-1); pts=[]
+    def _parse(self, outputs):
+        y = outputs[0]
+        conf = 1.0
+
+        squeezed = np.squeeze(y)
+
+        if squeezed.ndim == 3 and squeezed.shape[0] == 21 and squeezed.shape[1] > 4:
+            pts = []
+            vs = []
             for i in range(21):
-                xi=flat[i*(3 if has_z else 2)+0]; yi=flat[i*(3 if has_z else 2)+1]
-                pts.append((float(xi), float(yi)))
-        elif y.ndim==4 and y.shape[0]==1 and y.shape[1]==21:
-            pts=[]; vs=[]
-            for i in range(21):
-                x01,y01,v=self._argmax2d(y[0,i]); pts.append((x01,y01)); vs.append(v)
-            conf=float(np.mean(vs))
-        return pts, conf
+                x01, y01, v = self._argmax2d(squeezed[i])
+                pts.append((x01, y01))
+                vs.append(v)
+            conf = float(np.mean(vs))
+            return np.array(pts, dtype=np.float32), conf
+
+        if squeezed.ndim == 3 and squeezed.shape[0] == 21 and squeezed.shape[1] in (2, 3):
+            pts = squeezed[:, :2].astype(np.float32)
+            if squeezed.shape[1] >= 3:
+                conf = float(np.mean(np.clip(squeezed[:, 2], 0.0, 1.0)))
+            return pts, conf
+
+        if squeezed.ndim == 2 and squeezed.shape[0] == 21:
+            pts = squeezed[:, :2].astype(np.float32)
+            if squeezed.shape[1] >= 3:
+                conf = float(np.mean(np.clip(squeezed[:, 2], 0.0, 1.0)))
+            return pts, conf
+
+        if squeezed.ndim == 1 and squeezed.shape[0] in (42, 63):
+            stride = 3 if squeezed.shape[0] == 63 else 2
+            pts = squeezed.reshape(21, stride)[:, :2].astype(np.float32)
+            return pts, conf
+
+        if squeezed.ndim == 2 and squeezed.shape[0] in (42, 63):
+            stride = 3 if squeezed.shape[0] == 63 else 2
+            pts = squeezed.reshape(21, stride)[:, :2].astype(np.float32)
+            return pts, conf
+
+        return None, 0.0
 
     def infer(self, rgb, detection):
         roi = detection.get("roi") if isinstance(detection, dict) else None
@@ -529,11 +559,15 @@ class LandmarkONNX:
         if pts01 is None:
             return None, 0.0
 
+        pts01 = self._normalize_pts(pts01)
+        if pts01 is None:
+            return None, 0.0
+
         lm = []
         if roi and Minv is not None:
             for i, (px, py) in enumerate(pts01):
-                pxn = self._norm_coord(px) * (self.in_w - 1.0)
-                pyn = self._norm_coord(py) * (self.in_h - 1.0)
+                pxn = float(px) * (self.in_w - 1.0)
+                pyn = float(py) * (self.in_h - 1.0)
                 X = float(Minv[0, 0] * pxn + Minv[0, 1] * pyn + Minv[0, 2])
                 Y = float(Minv[1, 0] * pxn + Minv[1, 1] * pyn + Minv[1, 2])
                 if self.smooth:
@@ -544,10 +578,8 @@ class LandmarkONNX:
             x1, y1, x2, y2 = detection["xyxy"] if isinstance(detection, dict) else detection
             bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
             for i, (px, py) in enumerate(pts01):
-                pxn = self._norm_coord(px)
-                pyn = self._norm_coord(py)
-                X = x1 + pxn * bw
-                Y = y1 + pyn * bh
+                X = x1 + float(px) * bw
+                Y = y1 + float(py) * bh
                 if self.smooth:
                     X = self.filters[i * 2 + 0].apply(X)
                     Y = self.filters[i * 2 + 1].apply(Y)
