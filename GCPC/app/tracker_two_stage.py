@@ -1,9 +1,44 @@
 # -*- coding: utf-8 -*-
 # Two-stage CUDA tracker: detector (bboxes) + landmark head (21 pts)
-import os, cv2, numpy as np
+from numbers import Integral
+
+import cv2
+import numpy as np
 
 from .onnx_utils import create_onnx_session
 from .one_euro import OneEuro
+
+
+def _resolve_input_hw(requested_size, node_arg, log_prefix):
+    """Определяет размер входа модели, учитывая фактические статические размеры."""
+
+    fallback = None
+    if requested_size:
+        fallback = (int(requested_size[0]), int(requested_size[1]))
+
+    shape = getattr(node_arg, "shape", None)
+    guessed = None
+    if shape:
+        dims = []
+        for dim in shape:
+            if isinstance(dim, Integral):
+                val = int(dim)
+                if val > 4:
+                    dims.append(val)
+        if len(dims) >= 2:
+            guessed = (dims[-2], dims[-1])
+
+    if guessed:
+        if fallback and fallback != guessed:
+            print(f"{log_prefix} Игнорируем config размер {fallback} — модель ожидает {guessed}")
+        return guessed
+
+    if fallback:
+        return fallback
+
+    raise RuntimeError(
+        f"{log_prefix} Не удалось определить входной размер для {getattr(node_arg, 'name', '<input>')} (shape={shape})"
+    )
 
 def _letterbox(img, newh, neww):
     ih, iw = img.shape[:2]
@@ -51,7 +86,7 @@ class DetectorONNX:
         self.path = path
         self.sess = create_onnx_session(path, prefer_cuda=True, allow_fallback=True, log_prefix="[DET]")
         self.inp = self.sess.get_inputs()[0]
-        self.in_h, self.in_w = int(input_size[0]), int(input_size[1])
+        self.in_h, self.in_w = _resolve_input_hw(input_size, self.inp, "[DET]")
         self.out_names = [o.name for o in self.sess.get_outputs()]
     def infer(self, rgb):
         lb, meta = _letterbox(rgb, self.in_h, self.in_w)
@@ -86,7 +121,7 @@ class LandmarkONNX:
     def __init__(self, path, input_size, smooth=True, one_euro_cfg=None):
         self.sess = create_onnx_session(path, prefer_cuda=True, allow_fallback=True, log_prefix="[LMK]")
         self.inp = self.sess.get_inputs()[0]
-        self.in_h, self.in_w = int(input_size[0]), int(input_size[1])
+        self.in_h, self.in_w = _resolve_input_hw(input_size, self.inp, "[LMK]")
         self.out_names = [o.name for o in self.sess.get_outputs()]
         self.smooth = smooth
         self.filters = [OneEuro(**(one_euro_cfg or {"min_cutoff":1.2,"beta":0.025})) for _ in range(21*2)]
