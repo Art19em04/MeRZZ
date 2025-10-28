@@ -3,6 +3,7 @@
 from numbers import Integral
 
 import cv2
+import math
 import numpy as np
 
 from .onnx_utils import create_onnx_session
@@ -79,35 +80,247 @@ def _nms(boxes, scores, iou_th=0.45, topk=100):
         order = order[inds+1]
     return keep
 
+def _sigmoid(x):
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def _softmax(x):
+    x = x - np.max(x, axis=-1, keepdims=True)
+    ex = np.exp(x)
+    return ex / np.sum(ex, axis=-1, keepdims=True)
+
+
+def _node_static_shape(node_arg):
+    dims = []
+    shape = getattr(node_arg, "shape", None)
+    if not shape:
+        return tuple(dims)
+    for dim in shape:
+        if isinstance(dim, Integral):
+            dims.append(int(dim))
+        else:
+            dim_value = getattr(dim, "dim_value", None)
+            if isinstance(dim_value, Integral) and int(dim_value) > 0:
+                dims.append(int(dim_value))
+            else:
+                dims.append(None)
+    return tuple(dims)
+
+
+class _PalmDetectorDecoder:
+    """Decodes BlazePalm-style detector outputs into xyxy boxes."""
+
+    def __init__(self, input_hw, box_index, score_index):
+        self.in_h, self.in_w = input_hw
+        self.box_index = box_index
+        self.score_index = score_index
+        self.anchors = self._generate_anchors()
+        self.x_scale = float(self.in_w)
+        self.y_scale = float(self.in_h)
+        self.w_scale = float(self.in_w)
+        self.h_scale = float(self.in_h)
+        self.score_clip = 100.0
+        self._warned_anchor_mismatch = False
+
+    def _generate_anchors(self):
+        # MediaPipe palm detector anchor spec
+        strides = [8, 16, 32, 32]
+        anchor_offset_x = 0.5
+        anchor_offset_y = 0.5
+        aspect_ratios = [1.0]
+        interpolated_scale_aspect_ratio = 1.0
+
+        anchors = []
+
+        for stride in strides:
+            feature_h = int(math.ceil(self.in_h / float(stride)))
+            feature_w = int(math.ceil(self.in_w / float(stride)))
+
+            for y in range(feature_h):
+                for x in range(feature_w):
+                    x_center = (x + anchor_offset_x) / feature_w
+                    y_center = (y + anchor_offset_y) / feature_h
+
+                    for _ in aspect_ratios:
+                        anchors.append((x_center, y_center, 1.0, 1.0))
+
+                    if interpolated_scale_aspect_ratio > 0.0:
+                        anchors.append((x_center, y_center, 1.0, 1.0))
+
+        return np.array(anchors, dtype=np.float32)
+
+    @classmethod
+    def try_create(cls, session, input_hw):
+        outputs = session.get_outputs()
+        box_idx = None
+        score_idx = None
+        for idx, out in enumerate(outputs):
+            shape = _node_static_shape(out)
+            if len(shape) >= 3:
+                last_dim = shape[-1]
+                if last_dim == 18 or last_dim == 7 or last_dim == 16:
+                    if box_idx is None:
+                        box_idx = idx
+                elif last_dim == 1 or last_dim == 2:
+                    if score_idx is None:
+                        score_idx = idx
+        if box_idx is None or score_idx is None:
+            return None
+        return cls(input_hw, box_idx, score_idx)
+
+    def decode(self, outputs):
+        raw_boxes = np.array(outputs[self.box_index])
+        raw_scores = np.array(outputs[self.score_index])
+
+        raw_boxes = raw_boxes.reshape(-1, raw_boxes.shape[-1])
+        raw_scores = raw_scores.reshape(-1, raw_scores.shape[-1])
+
+        if raw_boxes.shape[0] != self.anchors.shape[0]:
+            count = min(raw_boxes.shape[0], self.anchors.shape[0])
+            raw_boxes = raw_boxes[:count]
+            raw_scores = raw_scores[:count]
+            anchors = self.anchors[:count]
+        else:
+            anchors = self.anchors
+
+        if raw_scores.shape[-1] == 1:
+            scores = _sigmoid(np.clip(raw_scores[:, 0], -self.score_clip, self.score_clip))
+        else:
+            probs = _softmax(np.clip(raw_scores, -self.score_clip, self.score_clip))
+            scores = probs[:, -1]
+
+        boxes = self._decode_with_anchors(raw_boxes, scores, anchors)
+        if boxes:
+            return boxes
+
+        # fallback heuristics when anchor metadata mismatches the export
+        if not self._warned_anchor_mismatch:
+            print("[DET] Не удалось сопоставить anchors с выходами модели — включаем эвристики декодирования")
+            self._warned_anchor_mismatch = True
+        boxes = self._decode_direct_xywh(raw_boxes, scores)
+        if boxes:
+            return boxes
+
+        return self._decode_direct_xyxy(raw_boxes, scores)
+
+    def _decode_with_anchors(self, raw_boxes, scores, anchors):
+        boxes = []
+        for i, rb in enumerate(raw_boxes):
+            sc = float(scores[i])
+            if sc <= 0:
+                continue
+            anchor = anchors[i]
+            x_center = rb[0] / self.x_scale * anchor[2] + anchor[0]
+            y_center = rb[1] / self.y_scale * anchor[3] + anchor[1]
+            w = math.exp(rb[2] / self.w_scale) * anchor[2]
+            h = math.exp(rb[3] / self.h_scale) * anchor[3]
+            x1 = (x_center - 0.5 * w) * self.in_w
+            y1 = (y_center - 0.5 * h) * self.in_h
+            x2 = (x_center + 0.5 * w) * self.in_w
+            y2 = (y_center + 0.5 * h) * self.in_h
+            if not np.isfinite([x1, y1, x2, y2]).all():
+                continue
+            x1 = float(np.clip(x1, 0.0, self.in_w))
+            y1 = float(np.clip(y1, 0.0, self.in_h))
+            x2 = float(np.clip(x2, 0.0, self.in_w))
+            y2 = float(np.clip(y2, 0.0, self.in_h))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            boxes.append((x1, y1, x2, y2, sc))
+        return boxes
+
+    def _decode_direct_xywh(self, raw_boxes, scores):
+        boxes = []
+        for rb, sc in zip(raw_boxes, scores):
+            sc = float(sc)
+            if sc <= 0:
+                continue
+            vals = rb[:4]
+            if not np.isfinite(vals).all():
+                continue
+            x_c, y_c, w, h = vals
+            if max(abs(x_c), abs(y_c)) > 2.5:
+                continue
+            # treat as normalized center-width-height (0..1)
+            if max(abs(w), abs(h)) <= 1.5:
+                x1 = (x_c - 0.5 * w) * self.in_w
+                y1 = (y_c - 0.5 * h) * self.in_h
+                x2 = (x_c + 0.5 * w) * self.in_w
+                y2 = (y_c + 0.5 * h) * self.in_h
+            else:
+                x1 = x_c - 0.5 * w
+                y1 = y_c - 0.5 * h
+                x2 = x_c + 0.5 * w
+                y2 = y_c + 0.5 * h
+            x1 = float(np.clip(x1, 0.0, self.in_w))
+            y1 = float(np.clip(y1, 0.0, self.in_h))
+            x2 = float(np.clip(x2, 0.0, self.in_w))
+            y2 = float(np.clip(y2, 0.0, self.in_h))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            boxes.append((x1, y1, x2, y2, sc))
+        return boxes
+
+    def _decode_direct_xyxy(self, raw_boxes, scores):
+        boxes = []
+        for rb, sc in zip(raw_boxes, scores):
+            sc = float(sc)
+            if sc <= 0:
+                continue
+            vals = rb[:4]
+            if not np.isfinite(vals).all():
+                continue
+            x1, y1, x2, y2 = vals
+            if max(abs(x1), abs(y1), abs(x2), abs(y2)) <= 1.5:
+                x1 *= self.in_w
+                y1 *= self.in_h
+                x2 *= self.in_w
+                y2 *= self.in_h
+            x1 = float(np.clip(x1, 0.0, self.in_w))
+            y1 = float(np.clip(y1, 0.0, self.in_h))
+            x2 = float(np.clip(x2, 0.0, self.in_w))
+            y2 = float(np.clip(y2, 0.0, self.in_h))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            boxes.append((x1, y1, x2, y2, sc))
+        return boxes
+
+
 class DetectorONNX:
-    """Generic ONNX detector wrapper that expects [b,*,N,boxes+scores] or standard YOLO/RTMDet exporters.
-       For community hand models, we accept common export: (1, N, 85) with boxes xyxy and cls scores."""
+    """Generic ONNX detector wrapper that auto-detects BlazePalm outputs."""
+
     def __init__(self, path, input_size):
         self.path = path
         self.sess = create_onnx_session(path, prefer_cuda=True, allow_fallback=True, log_prefix="[DET]")
         self.inp = self.sess.get_inputs()[0]
         self.in_h, self.in_w = _resolve_input_hw(input_size, self.inp, "[DET]")
         self.out_names = [o.name for o in self.sess.get_outputs()]
+        self.decoder = _PalmDetectorDecoder.try_create(self.sess, (self.in_h, self.in_w))
     def infer(self, rgb):
         lb, meta = _letterbox(rgb, self.in_h, self.in_w)
         x = lb.astype(np.float32)/255.0
         x = np.transpose(x,(2,0,1))[None,...]
         out = self.sess.run(self.out_names, {self.inp.name: x})
-        y = out[0]
+
         boxes, scores = [], []
-        if y.ndim==3 and y.shape[-1] >= 6:
-            # assume (1, N, 6+) -> [x1,y1,x2,y2, score, class ...]
-            for row in y[0]:
-                x1,y1,x2,y2,score,cls = float(row[0]),float(row[1]),float(row[2]),float(row[3]),float(row[4]),float(row[5])
-                # accept all classes as "hand"
-                if score>0: boxes.append([x1,y1,x2,y2]); scores.append(score)
-        elif y.ndim==2 and y.shape[-1] >= 6:
-            for row in y:
-                x1,y1,x2,y2,score,cls = float(row[0]),float(row[1]),float(row[2]),float(row[3]),float(row[4]),float(row[5])
-                if score>0: boxes.append([x1,y1,x2,y2]); scores.append(score)
+        if self.decoder is not None:
+            decoded = self.decoder.decode(out)
+            for (x1, y1, x2, y2, sc) in decoded:
+                boxes.append([float(x1), float(y1), float(x2), float(y2)])
+                scores.append(float(sc))
         else:
-            # try alternate format: (1, 4, N) and (1, 1, N) etc. — not implemented fully
-            return [], meta
+            y = out[0]
+            if y.ndim==3 and y.shape[-1] >= 6:
+                # assume (1, N, 6+) -> [x1,y1,x2,y2, score, class ...]
+                for row in y[0]:
+                    x1,y1,x2,y2,score,cls = float(row[0]),float(row[1]),float(row[2]),float(row[3]),float(row[4]),float(row[5])
+                    if score>0: boxes.append([x1,y1,x2,y2]); scores.append(score)
+            elif y.ndim==2 and y.shape[-1] >= 6:
+                for row in y:
+                    x1,y1,x2,y2,score,cls = float(row[0]),float(row[1]),float(row[2]),float(row[3]),float(row[4]),float(row[5])
+                    if score>0: boxes.append([x1,y1,x2,y2]); scores.append(score)
+            else:
+                return [], meta
         # NMS in letterboxed space
         if boxes:
             keep = _nms(np.array(boxes), np.array(scores), iou_th=0.45, topk=50)

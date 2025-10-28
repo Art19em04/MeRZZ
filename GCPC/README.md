@@ -17,7 +17,7 @@ pip install -r requirements.txt
 ## Модель / выбор backend
 * По умолчанию используется **MediaPipe Hands** (модели идут внутри пакета).
 * Чтобы задействовать ONNX + CUDA, положи модели в `GCPC/models` или укажи абсолютные пути в `config.json` и выставь `"backend": "onnx"`.
-  * `onnx.detector_model` — детектор ладоней (формат `[x1,y1,x2,y2,score,cls]`).
+  * `onnx.detector_model` — детектор ладоней. Экспорт в стиле BlazePalm поддерживается автоматически, при несовпадении форматов появится сообщение `[DET] … эвристики декодирования`.
   * `onnx.landmark_model` — регрессор 21 точек. В консоли появится `[DET]/[LMK] Активен CUDAExecutionProvider ...`.
   * Если нужна только оннх-модель лэндмарков без детектора, выставь `"backend": "onnx_landmarks"`.
 
