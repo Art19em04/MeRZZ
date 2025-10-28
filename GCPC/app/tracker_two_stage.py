@@ -130,22 +130,48 @@ class _PalmDetectorDecoder:
         aspect_ratios = [1.0]
         interpolated_scale_aspect_ratio = 1.0
 
+        min_scale = 0.1171875
+        max_scale = 0.75
+
+        num_layers = len(strides)
+        scales = []
+        for layer_id in range(num_layers):
+            if num_layers == 1:
+                scales.append(min_scale)
+            else:
+                scale = min_scale + (max_scale - min_scale) * layer_id / (num_layers - 1)
+                scales.append(scale)
+
         anchors = []
 
-        for stride in strides:
+        for layer_id, stride in enumerate(strides):
             feature_h = int(math.ceil(self.in_h / float(stride)))
             feature_w = int(math.ceil(self.in_w / float(stride)))
+
+            scale = scales[layer_id]
+            if layer_id == num_layers - 1:
+                scale_next = 1.0
+            else:
+                scale_next = scales[layer_id + 1]
 
             for y in range(feature_h):
                 for x in range(feature_w):
                     x_center = (x + anchor_offset_x) / feature_w
                     y_center = (y + anchor_offset_y) / feature_h
 
-                    for _ in aspect_ratios:
-                        anchors.append((x_center, y_center, 1.0, 1.0))
+                    for aspect_ratio in aspect_ratios:
+                        ratio_sqrt = math.sqrt(aspect_ratio)
+                        anchor_h = scale / ratio_sqrt
+                        anchor_w = scale * ratio_sqrt
+                        anchors.append((x_center, y_center, anchor_w, anchor_h))
 
                     if interpolated_scale_aspect_ratio > 0.0:
-                        anchors.append((x_center, y_center, 1.0, 1.0))
+                        scale_interp = math.sqrt(scale * scale_next)
+                        ratio = interpolated_scale_aspect_ratio
+                        ratio_sqrt = math.sqrt(ratio)
+                        anchor_h = scale_interp / ratio_sqrt
+                        anchor_w = scale_interp * ratio_sqrt
+                        anchors.append((x_center, y_center, anchor_w, anchor_h))
 
         return np.array(anchors, dtype=np.float32)
 
@@ -298,7 +324,7 @@ class DetectorONNX:
         self.decoder = _PalmDetectorDecoder.try_create(self.sess, (self.in_h, self.in_w))
     def infer(self, rgb):
         lb, meta = _letterbox(rgb, self.in_h, self.in_w)
-        x = lb.astype(np.float32)/255.0
+        x = lb.astype(np.float32) / 127.5 - 1.0
         x = np.transpose(x,(2,0,1))[None,...]
         out = self.sess.run(self.out_names, {self.inp.name: x})
 
@@ -340,7 +366,8 @@ class LandmarkONNX:
         self.filters = [OneEuro(**(one_euro_cfg or {"min_cutoff":1.2,"beta":0.025})) for _ in range(21*2)]
 
     def _pre(self, crop):
-        x = cv2.resize(crop, (self.in_w, self.in_h), interpolation=cv2.INTER_LINEAR).astype(np.float32)/255.0
+        x = cv2.resize(crop, (self.in_w, self.in_h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+        x = x / 127.5 - 1.0
         x = np.transpose(x,(2,0,1))[None,...]
         return x
 
