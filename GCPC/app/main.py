@@ -2,7 +2,7 @@
 import os, json, time, cv2
 from PySide6 import QtWidgets
 from app.gestures import GestureState
-from app.os_events_win import press_combo
+from app.os_events_win import press_combo, mouse_move_normalized, mouse_press, mouse_release
 from app.osd import OSD
 from app.tracker_mediapipe import MediaPipeHandTracker
 
@@ -93,12 +93,27 @@ def main():
     one_active_hint=one_cfg.get("active_hint") or default_hint
     one_block_sequences=bool(one_cfg.get("block_sequences",True))
 
+    mouse_cfg=cfg.get("mouse_control",{})
+    mouse_enabled=bool(mouse_cfg.get("enabled",True))
+    raw_mouse_pose=str(mouse_cfg.get("activation_pose","LEFT_THUMBS_UP")).upper()
+    mouse_hold_pose=raw_mouse_pose
+    if raw_mouse_pose.startswith("LEFT_") or raw_mouse_pose.startswith("RIGHT_"):
+        mouse_hold_pose=raw_mouse_pose.split("_",1)[1]
+    mouse_status_label=mouse_cfg.get("status_label") or "MOUSE"
+    mouse_active_hint=mouse_cfg.get("active_hint") or f"{non_dom_label} HOLD: {mouse_hold_pose.replace('_',' ')}"
+    mouse_smooth=max(0.0,min(1.0,float(mouse_cfg.get("smoothing_alpha",0.25))))
+    pointer_hand=str(mouse_cfg.get("pointer_hand","right")).lower()
+
+    mouse_prev=None
+    mouse_left_down=False
+    mouse_right_down=False
+
     seq_active=False; seq_buffer=[]; last_evt_ms=0; last_sent_ms=0
     last_seen_R=int(time.time()*1000); last_seen_L=int(time.time()*1000)
     pending_R=None; last_R_event_ms=0
     last_R_label=""; last_L_label=""
     left_open_ts=None; undo_window_ms=int(bcfg.get("undo_window_ms",900))
-    one_hand_active=False; last_single_action=""
+    one_hand_active=False; mouse_active=False; last_single_action=""
 
     fps=None; last_frame_time=time.time()
 
@@ -168,17 +183,62 @@ def main():
         if not one_hand_active:
             last_single_action=""
 
+        mouse_flag=False
+        if mouse_enabled and non_dom_present:
+            mouse_flag = non_dom_state.pose_flags.get(mouse_hold_pose, False)
+            if not mouse_flag and mouse_hold_pose=="PINCH":
+                mouse_flag = non_dom_state.pose_flags.get("PINCH", False)
+        mouse_active = bool(mouse_flag) if mouse_enabled else False
+        if mouse_active:
+            one_hand_active=False
+        if not mouse_active:
+            mouse_prev=None
+            if mouse_left_down:
+                mouse_release("left"); mouse_left_down=False
+            if mouse_right_down:
+                mouse_release("right"); mouse_right_down=False
+
         # Start by two palms
         both_open = (gR.pose_flags.get("OPEN_PALM",False) and gL.pose_flags.get("OPEN_PALM",False))
-        if not seq_active and both_open and not (one_block_sequences and one_hand_active):
+        if not seq_active and both_open and not (one_block_sequences and one_hand_active) and not mouse_active:
             seq_active=True; seq_buffer.clear(); pending_R=None; last_evt_ms=now_ms
             print("[SEQ] Режим ввода: СТАРТ")
 
-        if one_hand_active and not seq_active and dom_event and dom_present:
+        if one_hand_active and not seq_active and dom_event and dom_present and not mouse_active:
             combo=single_map.get(dom_event)
             if combo and (now_ms-last_sent_ms)>=refractory_ms:
                 print(f"[ONE-HAND] {dom_event} -> {combo}"); press_combo(combo); last_sent_ms=now_ms
                 last_single_action=f"LAST: {dom_event} → {combo}"
+
+        if mouse_active:
+            pointer_source = right if pointer_hand=="right" else left
+            pointer_state = gR if pointer_hand=="right" else gL
+            if pointer_source:
+                tip=pointer_source["lm"][8]
+                target=(tip[0], tip[1])
+                if mouse_prev is None or mouse_smooth<=0.0:
+                    mouse_prev=target
+                else:
+                    prev_x, prev_y = mouse_prev
+                    mouse_prev=(prev_x + (target[0]-prev_x)*(1.0-mouse_smooth),
+                                 prev_y + (target[1]-prev_y)*(1.0-mouse_smooth))
+                mx,my=mouse_prev
+                mouse_move_normalized(mx,my)
+                is_fist=pointer_state.pose_flags.get("FIST",False)
+                if is_fist and not mouse_left_down:
+                    mouse_press("left"); mouse_left_down=True
+                if not is_fist and mouse_left_down:
+                    mouse_release("left"); mouse_left_down=False
+                is_open=pointer_state.pose_flags.get("OPEN_PALM",False)
+                if is_open and not mouse_right_down:
+                    mouse_press("right"); mouse_right_down=True
+                if not is_open and mouse_right_down:
+                    mouse_release("right"); mouse_right_down=False
+            else:
+                if mouse_left_down:
+                    mouse_release("left"); mouse_left_down=False
+                if mouse_right_down:
+                    mouse_release("right"); mouse_right_down=False
 
         # Right: candidate (ignore control poses)
         if seq_active and right:
@@ -220,10 +280,15 @@ def main():
             top = "REC"
             sub = ("BUF: "+ "+".join(seq_buffer[-6:])) if seq_buffer else "BUF: —"
             if pending_R: sub += f"   |   CAND: {pending_R}"
+            if mouse_active and mouse_enabled:
+                sub += f"   |   {mouse_status_label}"
             if one_hand_active and one_enabled:
                 sub += f"   |   {one_status_label}"
         else:
-            if one_hand_active and one_enabled:
+            if mouse_active and mouse_enabled:
+                top = mouse_status_label
+                sub = mouse_active_hint
+            elif one_hand_active and one_enabled:
                 top = one_status_label
                 sub = one_active_hint
                 if last_single_action:

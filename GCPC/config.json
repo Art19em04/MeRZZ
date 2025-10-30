@@ -56,13 +56,22 @@
     "active_hint": "LEFT HOLD: LEFT FIST",
     "block_sequences": true
   },
+  "mouse_control": {
+    "enabled": true,
+    "activation_pose": "LEFT_THUMBS_UP",
+    "status_label": "MOUSE",
+    "active_hint": "CURSOR: RIGHT POINT | LMB: FIST | RMB: OPEN PALM",
+    "smoothing_alpha": 0.25,
+    "pointer_hand": "right"
+  },
   "command_mappings": {
     "functional": {
       "START_SEQUENCE": "OPEN_PALM+OPEN_PALM",
       "CONFIRM_STEP": "LEFT_PINCH_TAP",
       "UNDO_STEP": "LEFT_OPEN_PALM→LEFT_FIST",
       "COMMIT_SEQUENCE": "FIST+FIST",
-      "ONE_HAND_MODE": "LEFT_FIST (hold)"
+      "ONE_HAND_MODE": "LEFT_FIST (hold)",
+      "MOUSE_MODE": "LEFT_THUMBS_UP (hold)"
     },
     "complex_gestures": {
       "POINT+FIST": "CTRL+ALT+T",

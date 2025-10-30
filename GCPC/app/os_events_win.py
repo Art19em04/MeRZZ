@@ -5,6 +5,9 @@ if not hasattr(wintypes, "ULONG_PTR"): wintypes.ULONG_PTR = wintypes.WPARAM
 ULONG_PTR=wintypes.ULONG_PTR; DWORD=wintypes.DWORD; WORD=wintypes.WORD; LONG=wintypes.LONG
 INPUT_MOUSE=0; INPUT_KEYBOARD=1; INPUT_HARDWARE=2
 KEYEVENTF_EXTENDEDKEY=0x0001; KEYEVENTF_KEYUP=0x0002; KEYEVENTF_UNICODE=0x0004; KEYEVENTF_SCANCODE=0x0008
+MOUSEEVENTF_MOVE=0x0001; MOUSEEVENTF_LEFTDOWN=0x0002; MOUSEEVENTF_LEFTUP=0x0004
+MOUSEEVENTF_RIGHTDOWN=0x0008; MOUSEEVENTF_RIGHTUP=0x0010; MOUSEEVENTF_ABSOLUTE=0x8000
+MOUSEEVENTF_VIRTUALDESK=0x4000
 MAPVK_VK_TO_VSC=0
 class KEYBDINPUT(ctypes.Structure):
     _fields_=[('wVk',WORD),('wScan',WORD),('dwFlags',DWORD),('time',DWORD),('dwExtraInfo',ULONG_PTR)]
@@ -29,8 +32,15 @@ def _key_event(vk,is_down=True,use_scan=False):
     if vk in EXTENDED_VK: flags |= KEYEVENTF_EXTENDEDKEY
     ki=KEYBDINPUT(0 if use_scan else vk, 0 if not use_scan else scan, flags, 0, 0)
     return INPUT(type=INPUT_KEYBOARD, ki=ki)
-def _send_inputs(ins):
-    arr=(INPUT*len(ins))(*ins); SendInput(len(ins), arr, ctypes.sizeof(INPUT)); time.sleep(0.02)
+def _mouse_input(dx=0, dy=0, data=0, flags=0):
+    return INPUT(type=INPUT_MOUSE, mi=MOUSEINPUT(dx, dy, data, flags, 0, 0))
+def _send_inputs(ins, delay=0.02):
+    if not ins:
+        return
+    arr=(INPUT*len(ins))(*ins)
+    SendInput(len(ins), arr, ctypes.sizeof(INPUT))
+    if delay:
+        time.sleep(delay)
 def _parse_combo(combo):
     parts=[p.strip().upper() for p in combo.split('+') if p.strip()]; mods=[]; main=None
     for p in parts:
@@ -54,3 +64,28 @@ def press_combo(combo, prefer_scan=False):
         evts.append(_key_event(main_vk, False, prefer_scan))
     for vk in reversed(mod_vks): evts.append(_key_event(vk, False, prefer_scan))
     _send_inputs(evts)
+def _norm_coord(v):
+    return max(0, min(65535, int(round(v * 65535.0))))
+def mouse_move_normalized(x, y):
+    xi=_norm_coord(x)
+    yi=_norm_coord(y)
+    flags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+    _send_inputs([_mouse_input(dx=xi, dy=yi, flags=flags)], delay=0.0)
+def mouse_press(button="left"):
+    btn=button.lower()
+    if btn=="left":
+        flags=MOUSEEVENTF_LEFTDOWN
+    elif btn=="right":
+        flags=MOUSEEVENTF_RIGHTDOWN
+    else:
+        raise ValueError(f"Unsupported mouse button: {button}")
+    _send_inputs([_mouse_input(flags=flags)], delay=0.0)
+def mouse_release(button="left"):
+    btn=button.lower()
+    if btn=="left":
+        flags=MOUSEEVENTF_LEFTUP
+    elif btn=="right":
+        flags=MOUSEEVENTF_RIGHTUP
+    else:
+        raise ValueError(f"Unsupported mouse button: {button}")
+    _send_inputs([_mouse_input(flags=flags)], delay=0.0)
