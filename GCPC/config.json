@@ -48,12 +48,21 @@
     "commit_dwell_ms": 260,
     "commit_refractory_ms": 1200
   },
+  "one_hand_mode": {
+    "enabled": true,
+    "hold_pose": "LEFT_FIST",
+    "hold_display": "LEFT FIST",
+    "status_label": "ONE-HAND",
+    "active_hint": "LEFT HOLD: LEFT FIST",
+    "block_sequences": true
+  },
   "command_mappings": {
     "functional": {
       "START_SEQUENCE": "OPEN_PALM+OPEN_PALM",
       "CONFIRM_STEP": "LEFT_PINCH_TAP",
       "UNDO_STEP": "LEFT_OPEN_PALM→LEFT_FIST",
-      "COMMIT_SEQUENCE": "FIST+FIST"
+      "COMMIT_SEQUENCE": "FIST+FIST",
+      "ONE_HAND_MODE": "LEFT_FIST (hold)"
     },
     "complex_gestures": {
       "POINT+FIST": "CTRL+ALT+T",

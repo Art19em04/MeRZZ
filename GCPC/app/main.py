@@ -72,17 +72,33 @@ def main():
     commit_deb =DebouncedTrigger(int(bcfg.get("commit_dwell_ms",260)), int(bcfg.get("commit_refractory_ms",1200)))
 
     cmd_map=cfg.get("command_mappings",{})
+    single_map=cmd_map.get("single_gestures",{})
     seq_map={}
     seq_map.update(cmd_map.get("complex_gestures",{}))
-    seq_map.update(cmd_map.get("single_gestures",{}))
+    seq_map.update(single_map)
     if not seq_map:
         seq_map=cfg.get("sequence_mappings",{})
+
+    dominant_hand=str(cfg.get("dominant_hand","right")).lower()
+    one_cfg=cfg.get("one_hand_mode",{})
+    one_enabled=bool(one_cfg.get("enabled",True))
+    raw_hold_pose=str(one_cfg.get("hold_pose","FIST")).upper()
+    one_hold_pose=raw_hold_pose
+    if raw_hold_pose.startswith("LEFT_") or raw_hold_pose.startswith("RIGHT_"):
+        one_hold_pose=raw_hold_pose.split("_",1)[1]
+    one_hold_display=one_cfg.get("hold_display") or raw_hold_pose
+    one_status_label=one_cfg.get("status_label") or "ONE-HAND"
+    non_dom_label="LEFT" if dominant_hand!="left" else "RIGHT"
+    default_hint=f"{non_dom_label} HOLD: {one_hold_display}"
+    one_active_hint=one_cfg.get("active_hint") or default_hint
+    one_block_sequences=bool(one_cfg.get("block_sequences",True))
 
     seq_active=False; seq_buffer=[]; last_evt_ms=0; last_sent_ms=0
     last_seen_R=int(time.time()*1000); last_seen_L=int(time.time()*1000)
     pending_R=None; last_R_event_ms=0
     last_R_label=""; last_L_label=""
     left_open_ts=None; undo_window_ms=int(bcfg.get("undo_window_ms",900))
+    one_hand_active=False; last_single_action=""
 
     fps=None; last_frame_time=time.time()
 
@@ -119,6 +135,8 @@ def main():
         left  = max(lefts,  key=lambda h: h.get("score",0)) if lefts else None
 
         # Update gesture states
+        evR=None; evL=None
+
         if right:
             last_seen_R=now_ms; evR=gR.update_and_classify(right["lm"]) or ""
             if evR: last_R_label=evR
@@ -135,11 +153,32 @@ def main():
         else:
             gL.pose_flags.clear()
 
+        dominant_is_right = dominant_hand != "left"
+        dom_event = evR if dominant_is_right else evL
+        if not dom_event: dom_event=None
+        dom_present = bool(right) if dominant_is_right else bool(left)
+        non_dom_present = bool(left) if dominant_is_right else bool(right)
+        non_dom_state = gL if dominant_is_right else gR
+        hold_flag=False
+        if one_enabled and non_dom_present:
+            hold_flag = non_dom_state.pose_flags.get(one_hold_pose, False)
+            if not hold_flag and one_hold_pose=="PINCH":
+                hold_flag = non_dom_state.pose_flags.get("PINCH", False)
+        one_hand_active = bool(hold_flag) if one_enabled else False
+        if not one_hand_active:
+            last_single_action=""
+
         # Start by two palms
         both_open = (gR.pose_flags.get("OPEN_PALM",False) and gL.pose_flags.get("OPEN_PALM",False))
-        if not seq_active and both_open:
+        if not seq_active and both_open and not (one_block_sequences and one_hand_active):
             seq_active=True; seq_buffer.clear(); pending_R=None; last_evt_ms=now_ms
             print("[SEQ] Режим ввода: СТАРТ")
+
+        if one_hand_active and not seq_active and dom_event and dom_present:
+            combo=single_map.get(dom_event)
+            if combo and (now_ms-last_sent_ms)>=refractory_ms:
+                print(f"[ONE-HAND] {dom_event} -> {combo}"); press_combo(combo); last_sent_ms=now_ms
+                last_single_action=f"LAST: {dom_event} → {combo}"
 
         # Right: candidate (ignore control poses)
         if seq_active and right:
@@ -177,9 +216,21 @@ def main():
             if exit_on_commit: seq_active=False
 
         # OSD text
-        top = "REC" if seq_active else "IDLE"
-        sub = ("BUF: "+ "+".join(seq_buffer[-6:])) if seq_buffer else "BUF: —"
-        if pending_R: sub += f"   |   CAND: {pending_R}"
+        if seq_active:
+            top = "REC"
+            sub = ("BUF: "+ "+".join(seq_buffer[-6:])) if seq_buffer else "BUF: —"
+            if pending_R: sub += f"   |   CAND: {pending_R}"
+            if one_hand_active and one_enabled:
+                sub += f"   |   {one_status_label}"
+        else:
+            if one_hand_active and one_enabled:
+                top = one_status_label
+                sub = one_active_hint
+                if last_single_action:
+                    sub += f"   |   {last_single_action}"
+            else:
+                top = "IDLE"
+                sub = "BUF: —"
         osd.set_text(top, sub)
 
         # debug draw
