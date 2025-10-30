@@ -48,11 +48,21 @@
     "commit_dwell_ms": 260,
     "commit_refractory_ms": 1200
   },
-  "sequence_mappings": {
-    "POINT+FIST": "CTRL+ALT+T",
-    "OPEN_PALM+FIST": "ALT+F4",
-    "PINCH_TAP": "CTRL+C",
-    "PINCH_HOLD": "CTRL+V",
-    "SWIPE_LEFT+SWIPE_RIGHT": "ALT+TAB"
+  "command_mappings": {
+    "functional": {
+      "START_SEQUENCE": "OPEN_PALM+OPEN_PALM",
+      "CONFIRM_STEP": "LEFT_PINCH_TAP",
+      "UNDO_STEP": "LEFT_OPEN_PALM→LEFT_FIST",
+      "COMMIT_SEQUENCE": "FIST+FIST"
+    },
+    "complex_gestures": {
+      "POINT+FIST": "CTRL+ALT+T",
+      "OPEN_PALM+FIST": "ALT+F4",
+      "SWIPE_LEFT+SWIPE_RIGHT": "ALT+TAB"
+    },
+    "single_gestures": {
+      "PINCH_TAP": "CTRL+C",
+      "PINCH_HOLD": "CTRL+V"
+    }
   }
 }

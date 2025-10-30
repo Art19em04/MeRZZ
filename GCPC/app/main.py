@@ -71,7 +71,12 @@ def main():
     confirm_deb=DebouncedTrigger(int(bcfg.get("confirm_dwell_ms",220)), int(bcfg.get("confirm_refractory_ms",700)))
     commit_deb =DebouncedTrigger(int(bcfg.get("commit_dwell_ms",260)), int(bcfg.get("commit_refractory_ms",1200)))
 
-    seq_map=cfg.get("sequence_mappings",{})
+    cmd_map=cfg.get("command_mappings",{})
+    seq_map={}
+    seq_map.update(cmd_map.get("complex_gestures",{}))
+    seq_map.update(cmd_map.get("single_gestures",{}))
+    if not seq_map:
+        seq_map=cfg.get("sequence_mappings",{})
 
     seq_active=False; seq_buffer=[]; last_evt_ms=0; last_sent_ms=0
     last_seen_R=int(time.time()*1000); last_seen_L=int(time.time()*1000)
