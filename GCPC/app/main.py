@@ -19,33 +19,76 @@ def load_config():
         return json.load(f)
 
 
-def resolve_side(tag, dominant_is_right):
+def _normalize_hand_choice(value, fallback):
+    if value is None:
+        return fallback
+    token = str(value).strip().lower()
+    if token in ("right", "r"):
+        return "RIGHT"
+    if token in ("left", "l"):
+        return "LEFT"
+    return fallback
+
+
+def build_hands(cfg):
+    hands_cfg = cfg.get("hands", {}) if isinstance(cfg.get("hands"), dict) else {}
+    dominant_raw = hands_cfg.get("dominant", cfg.get("dominant_hand", "right"))
+    dominant = _normalize_hand_choice(dominant_raw, "RIGHT")
+    support = _normalize_hand_choice(hands_cfg.get("support"), None)
+    if support not in ("LEFT", "RIGHT"):
+        support = "LEFT" if dominant == "RIGHT" else "RIGHT"
+    return {"dominant": dominant, "support": support}
+
+
+def resolve_side(tag, hands):
+    dominant_side = hands.get("dominant", "RIGHT")
+    support_side = hands.get("support") or ("LEFT" if dominant_side == "RIGHT" else "RIGHT")
     if tag is None:
-        return "RIGHT" if dominant_is_right else "LEFT"
+        return dominant_side
     tag = str(tag).strip().upper()
+    if not tag:
+        return dominant_side
     if tag in ("RIGHT", "LEFT", "BOTH", "EITHER", "ANY"):
         return tag
-    if tag == "DOMINANT":
-        return "RIGHT" if dominant_is_right else "LEFT"
-    if tag in ("NON_DOMINANT", "NON-DOMINANT", "OFFHAND"):
-        return "LEFT" if dominant_is_right else "RIGHT"
-    return tag or ("RIGHT" if dominant_is_right else "LEFT")
+    if tag in ("DOMINANT", "MAIN", "PRIMARY"):
+        return dominant_side
+    if tag in ("NON_DOMINANT", "NON-DOMINANT", "OFFHAND", "SUPPORT", "SECONDARY", "AUXILIARY", "FUNCTIONAL"):
+        return support_side
+    if tag in ("OPPOSITE", "OTHER"):
+        return support_side if support_side != dominant_side else dominant_side
+    return tag or dominant_side
 
 
-def parse_mapping_key(raw_key, dominant_is_right):
-    if not isinstance(raw_key, str) or "_" not in raw_key:
+def parse_mapping_key(raw_key, hands):
+    if not isinstance(raw_key, str):
         return None
-    side_part, rest = raw_key.split("_", 1)
-    type_part, sep, gesture_part = rest.partition("-")
-    if not sep:
-        return None
-    side = resolve_side(side_part, dominant_is_right)
-    gtype = type_part.strip().upper()
-    gestures = [g.strip().upper() for g in gesture_part.split(">")]
-    gestures = [g for g in gestures if g]
+    steps = [step.strip() for step in raw_key.split(">")]
+    gestures = []
+    side = None
+    for idx, step in enumerate(steps):
+        if not step:
+            continue
+        tokens = [tok.strip().upper() for tok in step.split("-") if tok.strip()]
+        if not tokens:
+            continue
+        first = tokens[0]
+        resolved = resolve_side(first, hands)
+        if resolved in {"RIGHT", "LEFT", "BOTH", "EITHER", "ANY"}:
+            if side is None and idx == 0:
+                side = resolved
+            if len(tokens) > 1:
+                tokens = tokens[1:]
+            else:
+                tokens = []
+        if not tokens:
+            continue
+        gesture = tokens[-1]
+        gestures.append(gesture)
     if not gestures:
         return None
-    return side, gtype, gestures
+    if side is None:
+        side = resolve_side("DOMINANT", hands)
+    return side, gestures
 
 
 def lookup_mapping(table, side, key):
@@ -156,16 +199,18 @@ def main():
     auto_exit = bool(seq_cfg.get("auto_exit_on_hand_exit", True))
     max_len = int(seq_cfg.get("max_len", 6))
 
-    dominant_hand = str(cfg.get("dominant_hand", "right")).lower()
-    dominant_is_right = dominant_hand != "left"
+    hands = build_hands(cfg)
+    dominant_side = hands["dominant"]
+    support_side = hands["support"]
+    dominant_is_right = dominant_side == "RIGHT"
 
     controls_cfg = cfg.get("controls", {})
     seq_ctrl = controls_cfg.get("sequence", {})
-    seq_input_side = resolve_side(seq_ctrl.get("input_hand", "dominant"), dominant_is_right)
+    seq_input_side = resolve_side(seq_ctrl.get("input_hand", "dominant"), hands)
     candidate_ignore = {str(g).upper() for g in seq_ctrl.get("candidate_ignore", ["OPEN_PALM", "FIST"])}
 
     confirm_cfg = seq_ctrl.get("confirm", {})
-    confirm_hand = resolve_side(confirm_cfg.get("hand", "non_dominant"), dominant_is_right)
+    confirm_hand = resolve_side(confirm_cfg.get("hand", "non_dominant"), hands)
     confirm_gesture = str(confirm_cfg.get("gesture", "PINCH_TAP")).upper()
     confirm_deb = DebouncedTrigger(
         int(confirm_cfg.get("dwell_ms", 220)),
@@ -173,13 +218,13 @@ def main():
     )
 
     undo_cfg = seq_ctrl.get("undo", {})
-    undo_hand = resolve_side(undo_cfg.get("hand", "non_dominant"), dominant_is_right)
+    undo_hand = resolve_side(undo_cfg.get("hand", "non_dominant"), hands)
     undo_start = str(undo_cfg.get("start_gesture", "OPEN_PALM")).upper()
     undo_end = str(undo_cfg.get("end_gesture", "FIST")).upper()
     undo_window_ms = int(undo_cfg.get("window_ms", 900))
 
     commit_cfg = seq_ctrl.get("commit", {})
-    commit_hand = resolve_side(commit_cfg.get("hand", "both"), dominant_is_right)
+    commit_hand = resolve_side(commit_cfg.get("hand", "both"), hands)
     commit_gesture = str(commit_cfg.get("gesture", "FIST")).upper()
     commit_deb = DebouncedTrigger(
         int(commit_cfg.get("dwell_ms", 260)),
@@ -193,22 +238,22 @@ def main():
 
     single_map = {}
     for raw_key, combo in single_map_raw.items():
-        parsed = parse_mapping_key(raw_key, dominant_is_right)
+        parsed = parse_mapping_key(raw_key, hands)
         if not parsed:
             continue
-        side, gtype, gestures = parsed
-        if gtype != "SINGLE" or not gestures:
+        side, gestures = parsed
+        if not gestures:
             continue
         bucket = single_map.setdefault(side, {})
         bucket[gestures[0]] = combo
 
     seq_map = {}
     for raw_key, combo in complex_map_raw.items():
-        parsed = parse_mapping_key(raw_key, dominant_is_right)
+        parsed = parse_mapping_key(raw_key, hands)
         if not parsed:
             continue
-        side, gtype, gestures = parsed
-        if gtype != "SEQUENCE" or not gestures:
+        side, gestures = parsed
+        if not gestures:
             continue
         bucket = seq_map.setdefault(side, {})
         bucket[tuple(gestures)] = combo
@@ -228,10 +273,10 @@ def main():
         result = {"hand": default_hand, "gesture": default_gesture}
         if isinstance(entry, dict):
             if "hand" in entry and entry["hand"] is not None:
-                result["hand"] = str(entry["hand"]).lower()
+                result["hand"] = entry["hand"]
             if "gesture" in entry and entry["gesture"] is not None:
                 result["gesture"] = str(entry["gesture"]).upper()
-        result["hand"] = result["hand"].lower()
+        result["hand"] = resolve_side(result["hand"], hands)
         result["gesture"] = result["gesture"].upper()
         return result
 
@@ -247,22 +292,24 @@ def main():
         if not gesture:
             return ""
         gesture_txt = gesture.replace("_", " ")
-        hand = trig.get("hand", "non_dominant")
-        if hand == "both":
+        hand = str(trig.get("hand", support_side)).upper()
+        if hand == "BOTH":
             prefix = "BOTH"
-        elif hand == "dominant":
-            prefix = "RIGHT" if dominant_is_right else "LEFT"
-        elif hand == "non_dominant":
-            prefix = "LEFT" if dominant_is_right else "RIGHT"
+        elif hand in ("EITHER", "ANY"):
+            prefix = "EITHER"
+        elif hand == dominant_side:
+            prefix = dominant_side
+        elif hand == support_side:
+            prefix = support_side
         else:
-            prefix = str(hand).upper()
+            prefix = hand
         return f"{prefix} {gesture_txt}".strip()
 
     one_cfg = cfg.get("one_hand_mode", {})
     one_enabled = bool(one_cfg.get("enabled", True))
     one_status_label = one_cfg.get("status_label") or "ONE-HAND"
     one_active_hint = one_cfg.get("active_hint")
-    dispatch_side = resolve_side(one_cfg.get("dispatch_hand", "dominant"), dominant_is_right)
+    dispatch_side = resolve_side(one_cfg.get("dispatch_hand", "dominant"), hands)
     if not one_active_hint:
         trig_label = _trigger_label(mode_triggers["one_hand"])
         one_active_hint = f"{trig_label} → SINGLE" if trig_label else "ONE-HAND"
@@ -271,7 +318,9 @@ def main():
     mouse_enabled = bool(mouse_cfg.get("enabled", True))
     mouse_status_label = mouse_cfg.get("status_label") or "MOUSE"
     mouse_smooth = max(0.0, min(1.0, float(mouse_cfg.get("smoothing_alpha", 0.25))))
-    pointer_hand = str(mouse_cfg.get("pointer_hand", "right")).lower()
+    pointer_side = resolve_side(mouse_cfg.get("pointer_hand", "dominant"), hands)
+    if pointer_side not in ("RIGHT", "LEFT"):
+        pointer_side = dominant_side
     pointer_landmark = int(mouse_cfg.get("pointer_landmark", 8))
     if pointer_landmark < 0 or pointer_landmark > 20:
         pointer_landmark = 8
@@ -280,7 +329,7 @@ def main():
     mouse_active_hint = mouse_cfg.get("active_hint")
     if not mouse_active_hint:
         trig_label = _trigger_label(mode_triggers["mouse"])
-        pointer_txt = pointer_hand.upper()
+        pointer_txt = pointer_side
         mouse_active_hint = (
             f"{trig_label} | CURSOR: {pointer_txt} POINT | LMB: {mouse_left_pose} | RMB: {mouse_right_pose}"
             if trig_label
@@ -432,21 +481,18 @@ def main():
                     seq_active = False
                 print("[SEQ] Авто-отмена: левая рука вне кадра")
 
-        dom_event = evR if dominant_is_right else evL
-        non_dom_event = evL if dominant_is_right else evR
+        dom_event = evR if dominant_side == "RIGHT" else evL
+        support_event = evR if support_side == "RIGHT" else evL
         def _trigger_fired(trig):
             nonlocal both_pose_latched
             gesture = trig.get("gesture")
             hand = trig.get("hand")
             if not gesture:
                 return False
-            if hand == "non_dominant":
-                return non_dom_event == gesture
-            if hand == "dominant":
-                return dom_event == gesture
-            if hand == "either":
-                return (dom_event == gesture) or (non_dom_event == gesture)
-            if hand == "both":
+            hand = (hand or "").upper()
+            if not hand:
+                return False
+            if hand == "BOTH":
                 active = bool(right and left and gR.pose_flags.get(gesture, False) and gL.pose_flags.get(gesture, False))
                 if not active:
                     both_pose_latched[gesture] = False
@@ -455,10 +501,16 @@ def main():
                     return False
                 both_pose_latched[gesture] = True
                 return True
-            if hand == "right":
+            if hand in ("EITHER", "ANY"):
+                return (evR == gesture) or (evL == gesture)
+            if hand == "RIGHT":
                 return evR == gesture
-            if hand == "left":
+            if hand == "LEFT":
                 return evL == gesture
+            if hand == dominant_side:
+                return dom_event == gesture
+            if hand == support_side:
+                return support_event == gesture
             return False
 
         time_since_change = now_ms - mode_last_change_ms
@@ -521,8 +573,8 @@ def main():
                         break
 
         if mouse_active:
-            pointer_source = right if pointer_hand == "right" else left
-            pointer_state = gR if pointer_hand == "right" else gL
+            pointer_source = right if pointer_side == "RIGHT" else left
+            pointer_state = gR if pointer_side == "RIGHT" else gL
             if pointer_source:
                 tip = pointer_source["lm"][pointer_landmark]
                 target = (tip[0], tip[1])
