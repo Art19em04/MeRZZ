@@ -220,6 +220,67 @@ def main():
     seq_input_side = resolve_side(seq_ctrl.get("input_hand", "dominant"), hands)
     candidate_ignore = {str(g).upper() for g in seq_ctrl.get("candidate_ignore", ["OPEN_PALM", "FIST"])}
 
+    def _binding_from_string(raw_binding):
+        if not isinstance(raw_binding, str):
+            return None
+        parsed = parse_mapping_key(raw_binding, hands)
+        if not parsed:
+            return None
+        side, gestures = parsed
+        if not gestures:
+            return None
+        return side, gestures
+
+    def _parse_single_binding(raw_value, default_binding, default_hand, default_gesture):
+        def _fallback():
+            return {
+                "hand": resolve_side(default_hand, hands),
+                "gesture": str(default_gesture).upper(),
+            }
+
+        candidate = raw_value if raw_value is not None else default_binding
+        if isinstance(candidate, str):
+            parsed = _binding_from_string(candidate)
+            if parsed:
+                side, gestures = parsed
+                return {"hand": side, "gesture": gestures[-1]}
+        if isinstance(candidate, dict):
+            hand_token = candidate.get("hand", default_hand)
+            gesture_token = candidate.get("gesture", default_gesture)
+            return {
+                "hand": resolve_side(hand_token, hands),
+                "gesture": str(gesture_token).upper(),
+            }
+        if candidate is not default_binding:
+            return _parse_single_binding(None, default_binding, default_hand, default_gesture)
+        return _fallback()
+
+    def _parse_sequence_binding(raw_value, default_binding, default_hand, default_gestures):
+        def _fallback():
+            return {
+                "hand": resolve_side(default_hand, hands),
+                "gestures": [str(g).upper() for g in default_gestures],
+            }
+
+        candidate = raw_value if raw_value is not None else default_binding
+        if isinstance(candidate, str):
+            parsed = _binding_from_string(candidate)
+            if parsed:
+                side, gestures = parsed
+                if gestures:
+                    return {"hand": side, "gestures": gestures}
+        if isinstance(candidate, dict):
+            hand_token = candidate.get("hand", default_hand)
+            start_g = candidate.get("start_gesture", default_gestures[0])
+            end_g = candidate.get("end_gesture", default_gestures[-1])
+            return {
+                "hand": resolve_side(hand_token, hands),
+                "gestures": [str(start_g).upper(), str(end_g).upper()],
+            }
+        if candidate is not default_binding:
+            return _parse_sequence_binding(None, default_binding, default_hand, default_gestures)
+        return _fallback()
+
     confirm_cfg = seq_ctrl.get("confirm", {})
     confirm_binding_value = (
         confirm_cfg.get("binding")
@@ -310,67 +371,6 @@ def main():
 
     mode_cfg = cfg.get("mode_switches", {})
     mode_refractory_ms = int(mode_cfg.get("refractory_ms", 800))
-
-    def _binding_from_string(raw_binding):
-        if not isinstance(raw_binding, str):
-            return None
-        parsed = parse_mapping_key(raw_binding, hands)
-        if not parsed:
-            return None
-        side, gestures = parsed
-        if not gestures:
-            return None
-        return side, gestures
-
-    def _parse_single_binding(raw_value, default_binding, default_hand, default_gesture):
-        def _fallback():
-            return {
-                "hand": resolve_side(default_hand, hands),
-                "gesture": str(default_gesture).upper(),
-            }
-
-        candidate = raw_value if raw_value is not None else default_binding
-        if isinstance(candidate, str):
-            parsed = _binding_from_string(candidate)
-            if parsed:
-                side, gestures = parsed
-                return {"hand": side, "gesture": gestures[-1]}
-        if isinstance(candidate, dict):
-            hand_token = candidate.get("hand", default_hand)
-            gesture_token = candidate.get("gesture", default_gesture)
-            return {
-                "hand": resolve_side(hand_token, hands),
-                "gesture": str(gesture_token).upper(),
-            }
-        if candidate is not default_binding:
-            return _parse_single_binding(None, default_binding, default_hand, default_gesture)
-        return _fallback()
-
-    def _parse_sequence_binding(raw_value, default_binding, default_hand, default_gestures):
-        def _fallback():
-            return {
-                "hand": resolve_side(default_hand, hands),
-                "gestures": [str(g).upper() for g in default_gestures],
-            }
-
-        candidate = raw_value if raw_value is not None else default_binding
-        if isinstance(candidate, str):
-            parsed = _binding_from_string(candidate)
-            if parsed:
-                side, gestures = parsed
-                if gestures:
-                    return {"hand": side, "gestures": gestures}
-        if isinstance(candidate, dict):
-            hand_token = candidate.get("hand", default_hand)
-            start_g = candidate.get("start_gesture", default_gestures[0])
-            end_g = candidate.get("end_gesture", default_gestures[-1])
-            return {
-                "hand": resolve_side(hand_token, hands),
-                "gestures": [str(start_g).upper(), str(end_g).upper()],
-            }
-        if candidate is not default_binding:
-            return _parse_sequence_binding(None, default_binding, default_hand, default_gestures)
-        return _fallback()
 
     def _parse_trigger(name, default_binding, default_hand, default_gesture):
         entry = mode_cfg.get(name)
