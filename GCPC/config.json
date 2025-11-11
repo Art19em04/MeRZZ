@@ -41,24 +41,21 @@
     "max_len": 6,
     "exit_on_commit": true
   },
-  "bimanual": {
-    "confirm_dwell_ms": 220,
-    "confirm_refractory_ms": 700,
-    "undo_window_ms": 900,
-    "commit_dwell_ms": 260,
-    "commit_refractory_ms": 1200
-  },
   "one_hand_mode": {
     "enabled": true,
     "status_label": "ONE-HAND",
-    "active_hint": "LEFT FIST → SINGLE"
+    "active_hint": "LEFT FUNCTIONAL-FIST → SINGLE",
+    "dispatch_hand": "dominant"
   },
   "mouse_control": {
     "enabled": true,
     "status_label": "MOUSE",
-    "active_hint": "LEFT THUMBS UP | CURSOR: RIGHT POINT | LMB: FIST | RMB: OPEN PALM",
+    "active_hint": "LEFT FUNCTIONAL-THUMBS_UP | CURSOR: RIGHT POINT | LMB: FIST | RMB: OPEN_PALM",
     "smoothing_alpha": 0.25,
-    "pointer_hand": "right"
+    "pointer_hand": "right",
+    "pointer_landmark": 8,
+    "left_click_pose": "FIST",
+    "right_click_pose": "OPEN_PALM"
   },
   "mode_switches": {
     "refractory_ms": 800,
@@ -79,24 +76,52 @@
       "gesture": "SWIPE_LEFT"
     }
   },
+  "controls": {
+    "sequence": {
+      "input_hand": "dominant",
+      "candidate_ignore": [
+        "OPEN_PALM",
+        "FIST"
+      ],
+      "confirm": {
+        "hand": "non_dominant",
+        "gesture": "PINCH_TAP",
+        "dwell_ms": 220,
+        "refractory_ms": 700
+      },
+      "undo": {
+        "hand": "non_dominant",
+        "start_gesture": "OPEN_PALM",
+        "end_gesture": "FIST",
+        "window_ms": 900
+      },
+      "commit": {
+        "hand": "both",
+        "gesture": "FIST",
+        "dwell_ms": 260,
+        "refractory_ms": 1200,
+        "exit_on_commit": true
+      }
+    }
+  },
   "command_mappings": {
     "functional": {
-      "MODE_ONE_HAND": "LEFT FIST",
-      "MODE_RECORD": "BOTH OPEN PALMS",
-      "MODE_MOUSE": "LEFT THUMBS UP",
-      "MODE_EXIT": "LEFT SWIPE LEFT",
-      "CONFIRM_STEP": "LEFT_PINCH_TAP",
-      "UNDO_STEP": "LEFT_OPEN_PALM→LEFT_FIST",
-      "COMMIT_SEQUENCE": "FIST+FIST"
+      "LEFT_FUNCTIONAL-FIST": "MODE_ONE_HAND",
+      "BOTH_FUNCTIONAL-OPEN_PALM": "MODE_RECORD",
+      "LEFT_FUNCTIONAL-THUMBS_UP": "MODE_MOUSE",
+      "LEFT_FUNCTIONAL-SWIPE_LEFT": "MODE_EXIT",
+      "LEFT_FUNCTIONAL-PINCH_TAP": "CONFIRM_STEP",
+      "LEFT_FUNCTIONAL-OPEN_PALM > FIST": "UNDO_STEP",
+      "BOTH_FUNCTIONAL-FIST": "COMMIT_SEQUENCE"
     },
     "complex_gestures": {
-      "POINT+FIST": "CTRL+ALT+T",
-      "OPEN_PALM+FIST": "ALT+F4",
-      "SWIPE_LEFT+SWIPE_RIGHT": "ALT+TAB"
+      "RIGHT_SEQUENCE-POINT > FIST": "CTRL+ALT+T",
+      "RIGHT_SEQUENCE-OPEN_PALM > FIST": "ALT+F4",
+      "RIGHT_SEQUENCE-SWIPE_LEFT > SWIPE_RIGHT": "ALT+TAB"
     },
     "single_gestures": {
-      "PINCH_TAP": "CTRL+C",
-      "PINCH_HOLD": "CTRL+V"
+      "RIGHT_SINGLE-PINCH_TAP": "CTRL+C",
+      "RIGHT_SINGLE-PINCH_HOLD": "CTRL+V"
     }
   }
 }
