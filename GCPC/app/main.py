@@ -716,12 +716,18 @@ def main():
         elif _trigger_fired(mode_triggers["record"]) and time_since_change >= mode_refractory_ms:
             if current_mode == "record":
                 switch_mode("record", now_ms, force_reset=True)
-            else:
+            elif current_mode == "idle":
                 switch_mode("record", now_ms)
-        elif mouse_enabled and _trigger_fired(mode_triggers["mouse"]) and time_since_change >= mode_refractory_ms and current_mode != "mouse":
-            switch_mode("mouse", now_ms)
-        elif one_enabled and _trigger_fired(mode_triggers["one_hand"]) and time_since_change >= mode_refractory_ms and current_mode != "one_hand":
-            switch_mode("one_hand", now_ms)
+        elif mouse_enabled and _trigger_fired(mode_triggers["mouse"]) and time_since_change >= mode_refractory_ms:
+            if current_mode == "mouse":
+                switch_mode("mouse", now_ms, force_reset=True)
+            elif current_mode == "idle":
+                switch_mode("mouse", now_ms)
+        elif one_enabled and _trigger_fired(mode_triggers["one_hand"]) and time_since_change >= mode_refractory_ms:
+            if current_mode == "one_hand":
+                switch_mode("one_hand", now_ms, force_reset=True)
+            elif current_mode == "idle":
+                switch_mode("one_hand", now_ms)
 
         if current_mode != "mouse":
             mouse_prev = None
