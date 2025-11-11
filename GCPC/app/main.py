@@ -66,9 +66,10 @@ def parse_mapping_key(raw_key, hands):
     denotes which hand initiates the mapping (e.g. ``DOMINANT`` or ``LEFT``)
     and the last token of each segment represents the actual gesture name.
     Segments are chained with ``>`` to describe ordered sequences.  For
-    example, ``DOMINANT-SEQUENCE-SWIPE_LEFT > SEQUENCE-SWIPE_RIGHT`` reads as
-    "start with the dominant hand performing ``SWIPE_LEFT`` inside the
-    sequence track, then expect ``SWIPE_RIGHT`` as the next sequence gesture".
+    example, ``DOMINANT-SEQUENCE-SWIPE_LEFT > DOMINANT-SEQUENCE-SWIPE_RIGHT``
+    reads as "start with the dominant hand performing ``SWIPE_LEFT`` inside
+    the sequence track, then expect the same hand to perform ``SWIPE_RIGHT``
+    as the next sequence gesture".
     """
     if not isinstance(raw_key, str):
         return None
@@ -246,7 +247,7 @@ def main():
     )
     undo_binding = _parse_sequence_binding(
         undo_binding_value,
-        "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > FUNCTIONAL-FIST",
+        "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > NON_DOMINANT-FUNCTIONAL-FIST",
         "non_dominant",
         ("OPEN_PALM", "FIST"),
     )

@@ -47,13 +47,13 @@
   "one_hand_mode": {
     "enabled": true,
     "status_label": "ONE-HAND",
-    "active_hint": "FUNCTIONAL-FIST → SINGLE",
+    "active_hint": "NON_DOMINANT-FUNCTIONAL-FIST → DOMINANT-SINGLE",
     "dispatch_hand": "dominant"
   },
   "mouse_control": {
     "enabled": true,
     "status_label": "MOUSE",
-    "active_hint": "FUNCTIONAL-THUMBS_UP | CURSOR: DOMINANT POINT | LMB: FIST | RMB: OPEN_PALM",
+    "active_hint": "NON_DOMINANT-FUNCTIONAL-THUMBS_UP | CURSOR: DOMINANT-SINGLE-POINT | LMB: DOMINANT-SINGLE-FIST | RMB: DOMINANT-SINGLE-OPEN_PALM",
     "smoothing_alpha": 0.25,
     "pointer_hand": "dominant",
     "pointer_landmark": 8,
@@ -80,7 +80,7 @@
         "refractory_ms": 700
       },
       "undo": {
-        "binding": "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > FUNCTIONAL-FIST",
+        "binding": "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > NON_DOMINANT-FUNCTIONAL-FIST",
         "window_ms": 900
       },
       "commit": {
@@ -93,18 +93,18 @@
   },
   "command_mappings": {
     "functional": {
-      "FUNCTIONAL-FIST": "MODE_ONE_HAND",
-      "FUNCTIONAL-OPEN_PALM": "MODE_RECORD",
-      "FUNCTIONAL-THUMBS_UP": "MODE_MOUSE",
-      "FUNCTIONAL-SWIPE_LEFT": "MODE_EXIT",
-      "FUNCTIONAL-PINCH_TAP": "CONFIRM_STEP",
-      "FUNCTIONAL-OPEN_PALM > FUNCTIONAL-FIST": "UNDO_STEP",
-      "BOTH-FIST": "COMMIT_SEQUENCE"
+      "NON_DOMINANT-FUNCTIONAL-FIST": "MODE_ONE_HAND",
+      "BOTH-FUNCTIONAL-OPEN_PALM": "MODE_RECORD",
+      "NON_DOMINANT-FUNCTIONAL-THUMBS_UP": "MODE_MOUSE",
+      "NON_DOMINANT-FUNCTIONAL-SWIPE_LEFT": "MODE_EXIT",
+      "NON_DOMINANT-FUNCTIONAL-PINCH_TAP": "CONFIRM_STEP",
+      "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > NON_DOMINANT-FUNCTIONAL-FIST": "UNDO_STEP",
+      "BOTH-FUNCTIONAL-FIST": "COMMIT_SEQUENCE"
     },
     "complex_gestures": {
-      "DOMINANT-SEQUENCE-POINT > SEQUENCE-FIST": "CTRL+ALT+T",
-      "DOMINANT-SEQUENCE-OPEN_PALM > SEQUENCE-FIST": "ALT+F4",
-      "DOMINANT-SEQUENCE-SWIPE_LEFT > SEQUENCE-SWIPE_RIGHT": "ALT+TAB"
+      "DOMINANT-SEQUENCE-POINT > DOMINANT-SEQUENCE-FIST": "CTRL+ALT+T",
+      "DOMINANT-SEQUENCE-OPEN_PALM > DOMINANT-SEQUENCE-FIST": "ALT+F4",
+      "DOMINANT-SEQUENCE-SWIPE_LEFT > DOMINANT-SEQUENCE-SWIPE_RIGHT": "ALT+TAB"
     },
     "single_gestures": {
       "DOMINANT-SINGLE-PINCH_TAP": "CTRL+C",
@@ -113,10 +113,10 @@
   },
   "_gesture_notation": [
     "Блок строится как [СТОРОНА]-[КОНТЕКСТ]-[ЖЕСТ], где сторона может быть LEFT/RIGHT/BOTH или DOMINANT/NON_DOMINANT",
-    "Если сторона не указана, используется ведущая рука из настроек",
+    "Каждый фрагмент последовательности должен содержать все три части и, при необходимости, повторять сторону для ясности",
     "КОНТЕКСТ помогает понять канал ввода: SINGLE для одиночных жестов, SEQUENCE для записываемых шагов, FUNCTIONAL для служебных жестов",
     "Последовательность жестов разделяется символом '>' и читается слева направо",
-    "Пример: DOMINANT-SEQUENCE-SWIPE_LEFT > SEQUENCE-SWIPE_RIGHT — сначала ведущая рука выполняет SWIPE_LEFT в режиме последовательности, затем ожидается SWIPE_RIGHT как следующий шаг"
+    "Пример: DOMINANT-SEQUENCE-SWIPE_LEFT > DOMINANT-SEQUENCE-SWIPE_RIGHT — сначала ведущая рука выполняет SWIPE_LEFT в режиме последовательности, затем та же рука выполняет SWIPE_RIGHT как следующий шаг"
   ],
   "_pc_actions": [
     "MODE_ONE_HAND — переключение в одноручный режим",
