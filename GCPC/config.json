@@ -8,7 +8,10 @@
     "max_num_hands": 2,
     "model_complexity": 1
   },
-  "dominant_hand": "right",
+  "hands": {
+    "dominant": "right",
+    "support": "left"
+  },
   "video": {
     "camera_index": 0,
     "width": 1280,
@@ -44,15 +47,15 @@
   "one_hand_mode": {
     "enabled": true,
     "status_label": "ONE-HAND",
-    "active_hint": "LEFT FUNCTIONAL-FIST → SINGLE",
+    "active_hint": "FUNCTIONAL-FIST → SINGLE",
     "dispatch_hand": "dominant"
   },
   "mouse_control": {
     "enabled": true,
     "status_label": "MOUSE",
-    "active_hint": "LEFT FUNCTIONAL-THUMBS_UP | CURSOR: RIGHT POINT | LMB: FIST | RMB: OPEN_PALM",
+    "active_hint": "FUNCTIONAL-THUMBS_UP | CURSOR: DOMINANT POINT | LMB: FIST | RMB: OPEN_PALM",
     "smoothing_alpha": 0.25,
-    "pointer_hand": "right",
+    "pointer_hand": "dominant",
     "pointer_landmark": 8,
     "left_click_pose": "FIST",
     "right_click_pose": "OPEN_PALM"
@@ -106,22 +109,36 @@
   },
   "command_mappings": {
     "functional": {
-      "LEFT_FUNCTIONAL-FIST": "MODE_ONE_HAND",
-      "BOTH_FUNCTIONAL-OPEN_PALM": "MODE_RECORD",
-      "LEFT_FUNCTIONAL-THUMBS_UP": "MODE_MOUSE",
-      "LEFT_FUNCTIONAL-SWIPE_LEFT": "MODE_EXIT",
-      "LEFT_FUNCTIONAL-PINCH_TAP": "CONFIRM_STEP",
-      "LEFT_FUNCTIONAL-OPEN_PALM > FIST": "UNDO_STEP",
-      "BOTH_FUNCTIONAL-FIST": "COMMIT_SEQUENCE"
+      "FUNCTIONAL-FIST": "MODE_ONE_HAND",
+      "FUNCTIONAL-OPEN_PALM": "MODE_RECORD",
+      "FUNCTIONAL-THUMBS_UP": "MODE_MOUSE",
+      "FUNCTIONAL-SWIPE_LEFT": "MODE_EXIT",
+      "FUNCTIONAL-PINCH_TAP": "CONFIRM_STEP",
+      "FUNCTIONAL-OPEN_PALM > FUNCTIONAL-FIST": "UNDO_STEP",
+      "BOTH-FIST": "COMMIT_SEQUENCE"
     },
     "complex_gestures": {
-      "RIGHT_SEQUENCE-POINT > FIST": "CTRL+ALT+T",
-      "RIGHT_SEQUENCE-OPEN_PALM > FIST": "ALT+F4",
-      "RIGHT_SEQUENCE-SWIPE_LEFT > SWIPE_RIGHT": "ALT+TAB"
+      "DOMINANT-SEQUENCE-POINT > SEQUENCE-FIST": "CTRL+ALT+T",
+      "DOMINANT-SEQUENCE-OPEN_PALM > SEQUENCE-FIST": "ALT+F4",
+      "DOMINANT-SEQUENCE-SWIPE_LEFT > SEQUENCE-SWIPE_RIGHT": "ALT+TAB"
     },
     "single_gestures": {
-      "RIGHT_SINGLE-PINCH_TAP": "CTRL+C",
-      "RIGHT_SINGLE-PINCH_HOLD": "CTRL+V"
+      "DOMINANT-SINGLE-PINCH_TAP": "CTRL+C",
+      "DOMINANT-SINGLE-PINCH_HOLD": "CTRL+V"
     }
-  }
+  },
+  "_pc_actions": [
+    "MODE_ONE_HAND — переключение в одноручный режим",
+    "MODE_MOUSE — управление курсором",
+    "MODE_RECORD — запись жестовой последовательности",
+    "MODE_EXIT — выход в режим ожидания",
+    "CONFIRM_STEP — добавление жеста в последовательность",
+    "UNDO_STEP — удаление последнего жеста в последовательности",
+    "COMMIT_SEQUENCE — применение записанной последовательности",
+    "CTRL+ALT+T — запуск терминала",
+    "ALT+F4 — закрытие активного окна",
+    "ALT+TAB — переключение между окнами",
+    "CTRL+C — копирование",
+    "CTRL+V — вставка"
+  ]
 }
