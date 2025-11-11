@@ -50,28 +50,44 @@
   },
   "one_hand_mode": {
     "enabled": true,
-    "hold_pose": "LEFT_FIST",
-    "hold_display": "LEFT FIST",
     "status_label": "ONE-HAND",
-    "active_hint": "LEFT HOLD: LEFT FIST",
-    "block_sequences": true
+    "active_hint": "LEFT FIST → SINGLE"
   },
   "mouse_control": {
     "enabled": true,
-    "activation_pose": "LEFT_THUMBS_UP",
     "status_label": "MOUSE",
-    "active_hint": "CURSOR: RIGHT POINT | LMB: FIST | RMB: OPEN PALM",
+    "active_hint": "LEFT THUMBS UP | CURSOR: RIGHT POINT | LMB: FIST | RMB: OPEN PALM",
     "smoothing_alpha": 0.25,
     "pointer_hand": "right"
   },
+  "mode_switches": {
+    "refractory_ms": 800,
+    "one_hand": {
+      "hand": "non_dominant",
+      "gesture": "FIST"
+    },
+    "record": {
+      "hand": "both",
+      "gesture": "OPEN_PALM"
+    },
+    "mouse": {
+      "hand": "non_dominant",
+      "gesture": "THUMBS_UP"
+    },
+    "exit": {
+      "hand": "non_dominant",
+      "gesture": "SWIPE_LEFT"
+    }
+  },
   "command_mappings": {
     "functional": {
-      "START_SEQUENCE": "OPEN_PALM+OPEN_PALM",
+      "MODE_ONE_HAND": "LEFT FIST",
+      "MODE_RECORD": "BOTH OPEN PALMS",
+      "MODE_MOUSE": "LEFT THUMBS UP",
+      "MODE_EXIT": "LEFT SWIPE LEFT",
       "CONFIRM_STEP": "LEFT_PINCH_TAP",
       "UNDO_STEP": "LEFT_OPEN_PALM→LEFT_FIST",
-      "COMMIT_SEQUENCE": "FIST+FIST",
-      "ONE_HAND_MODE": "LEFT_FIST (hold)",
-      "MOUSE_MODE": "LEFT_THUMBS_UP (hold)"
+      "COMMIT_SEQUENCE": "FIST+FIST"
     },
     "complex_gestures": {
       "POINT+FIST": "CTRL+ALT+T",

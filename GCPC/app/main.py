@@ -80,29 +80,66 @@ def main():
         seq_map=cfg.get("sequence_mappings",{})
 
     dominant_hand=str(cfg.get("dominant_hand","right")).lower()
+    dominant_is_right=(dominant_hand!="left")
+
+    mode_cfg=cfg.get("mode_switches",{})
+    mode_refractory_ms=int(mode_cfg.get("refractory_ms",800))
+
+    def _parse_trigger(name, default_hand, default_gesture):
+        entry=mode_cfg.get(name,{})
+        if isinstance(entry,str):
+            entry={"gesture":entry}
+        result={"hand":default_hand,"gesture":default_gesture}
+        if isinstance(entry,dict):
+            if "hand" in entry and entry["hand"] is not None:
+                result["hand"]=str(entry["hand"]).lower()
+            if "gesture" in entry and entry["gesture"] is not None:
+                result["gesture"]=str(entry["gesture"]).upper()
+        result["hand"]=result["hand"].lower()
+        result["gesture"]=result["gesture"].upper()
+        return result
+
+    mode_triggers={
+        "one_hand": _parse_trigger("one_hand","non_dominant","FIST"),
+        "record": _parse_trigger("record","both","OPEN_PALM"),
+        "mouse": _parse_trigger("mouse","non_dominant","THUMBS_UP"),
+        "exit": _parse_trigger("exit","non_dominant","SWIPE_LEFT"),
+    }
+
+    def _trigger_label(trig):
+        gesture=trig.get("gesture","")
+        if not gesture:
+            return ""
+        gesture_txt=gesture.replace("_"," ")
+        hand=trig.get("hand","non_dominant")
+        if hand=="both":
+            prefix="BOTH"
+        elif hand=="dominant":
+            prefix="RIGHT" if dominant_is_right else "LEFT"
+        elif hand=="non_dominant":
+            prefix="LEFT" if dominant_is_right else "RIGHT"
+        else:
+            prefix=str(hand).upper()
+        return f"{prefix} {gesture_txt}".strip()
+
     one_cfg=cfg.get("one_hand_mode",{})
     one_enabled=bool(one_cfg.get("enabled",True))
-    raw_hold_pose=str(one_cfg.get("hold_pose","FIST")).upper()
-    one_hold_pose=raw_hold_pose
-    if raw_hold_pose.startswith("LEFT_") or raw_hold_pose.startswith("RIGHT_"):
-        one_hold_pose=raw_hold_pose.split("_",1)[1]
-    one_hold_display=one_cfg.get("hold_display") or raw_hold_pose
     one_status_label=one_cfg.get("status_label") or "ONE-HAND"
-    non_dom_label="LEFT" if dominant_hand!="left" else "RIGHT"
-    default_hint=f"{non_dom_label} HOLD: {one_hold_display}"
-    one_active_hint=one_cfg.get("active_hint") or default_hint
-    one_block_sequences=bool(one_cfg.get("block_sequences",True))
+    one_active_hint=one_cfg.get("active_hint")
+    if not one_active_hint:
+        trig_label=_trigger_label(mode_triggers["one_hand"])
+        one_active_hint=f"{trig_label} → SINGLE" if trig_label else "ONE-HAND"
 
     mouse_cfg=cfg.get("mouse_control",{})
     mouse_enabled=bool(mouse_cfg.get("enabled",True))
-    raw_mouse_pose=str(mouse_cfg.get("activation_pose","LEFT_THUMBS_UP")).upper()
-    mouse_hold_pose=raw_mouse_pose
-    if raw_mouse_pose.startswith("LEFT_") or raw_mouse_pose.startswith("RIGHT_"):
-        mouse_hold_pose=raw_mouse_pose.split("_",1)[1]
     mouse_status_label=mouse_cfg.get("status_label") or "MOUSE"
-    mouse_active_hint=mouse_cfg.get("active_hint") or f"{non_dom_label} HOLD: {mouse_hold_pose.replace('_',' ')}"
     mouse_smooth=max(0.0,min(1.0,float(mouse_cfg.get("smoothing_alpha",0.25))))
     pointer_hand=str(mouse_cfg.get("pointer_hand","right")).lower()
+    mouse_active_hint=mouse_cfg.get("active_hint")
+    if not mouse_active_hint:
+        trig_label=_trigger_label(mode_triggers["mouse"])
+        pointer_txt=pointer_hand.upper()
+        mouse_active_hint=f"{trig_label} | CURSOR: {pointer_txt} POINT | LMB: FIST | RMB: OPEN PALM" if trig_label else "CURSOR CONTROL"
 
     mouse_prev=None
     mouse_left_down=False
@@ -114,6 +151,39 @@ def main():
     last_R_label=""; last_L_label=""
     left_open_ts=None; undo_window_ms=int(bcfg.get("undo_window_ms",900))
     one_hand_active=False; mouse_active=False; last_single_action=""
+    current_mode="idle"; mode_last_change_ms=0
+    both_pose_latched={}
+
+    def switch_mode(new_mode, now_ms, force_reset=False):
+        nonlocal current_mode, seq_active, one_hand_active, mouse_active, mouse_prev, mouse_left_down, mouse_right_down
+        nonlocal last_single_action, seq_buffer, pending_R, last_evt_ms, mode_last_change_ms
+        prev=current_mode
+        if new_mode==prev and not force_reset:
+            mode_last_change_ms=now_ms
+            return
+        if new_mode=="record":
+            seq_buffer.clear(); pending_R=None
+            seq_active=True; last_evt_ms=now_ms
+        else:
+            seq_active=False
+            if prev=="record" or force_reset:
+                seq_buffer.clear(); pending_R=None
+        if new_mode!="mouse" or prev=="mouse" or force_reset:
+            if mouse_left_down:
+                mouse_release("left"); mouse_left_down=False
+            if mouse_right_down:
+                mouse_release("right"); mouse_right_down=False
+            mouse_prev=None
+        elif new_mode=="mouse":
+            mouse_prev=None
+        if new_mode!="one_hand":
+            last_single_action=""
+        one_hand_active=(new_mode=="one_hand") and one_enabled
+        mouse_active=(new_mode=="mouse") and mouse_enabled
+        current_mode=new_mode
+        mode_last_change_ms=now_ms
+        labels={"idle":"IDLE","record":"RECORD","mouse":mouse_status_label,"one_hand":one_status_label}
+        print(f"[MODE] -> {labels.get(new_mode,new_mode.upper())}")
 
     fps=None; last_frame_time=time.time()
 
@@ -159,7 +229,10 @@ def main():
             gR.pose_flags.clear()
             if seq_active and cancel_exit_ms>0 and (now_ms-last_seen_R)>=cancel_exit_ms:
                 seq_buffer.clear(); pending_R=None
-                if auto_exit: seq_active=False
+                if auto_exit:
+                    switch_mode("idle", now_ms, force_reset=True)
+                else:
+                    seq_active=False
                 print("[SEQ] Авто-отмена: правая рука вне кадра")
 
         if left:
@@ -168,41 +241,59 @@ def main():
         else:
             gL.pose_flags.clear()
 
-        dominant_is_right = dominant_hand != "left"
         dom_event = evR if dominant_is_right else evL
         if not dom_event: dom_event=None
+        non_dom_event = evL if dominant_is_right else evR
+        if not non_dom_event: non_dom_event=None
         dom_present = bool(right) if dominant_is_right else bool(left)
-        non_dom_present = bool(left) if dominant_is_right else bool(right)
-        non_dom_state = gL if dominant_is_right else gR
-        hold_flag=False
-        if one_enabled and non_dom_present:
-            hold_flag = non_dom_state.pose_flags.get(one_hold_pose, False)
-            if not hold_flag and one_hold_pose=="PINCH":
-                hold_flag = non_dom_state.pose_flags.get("PINCH", False)
-        one_hand_active = bool(hold_flag) if one_enabled else False
-        if not one_hand_active:
-            last_single_action=""
 
-        mouse_flag=False
-        if mouse_enabled and non_dom_present:
-            mouse_flag = non_dom_state.pose_flags.get(mouse_hold_pose, False)
-            if not mouse_flag and mouse_hold_pose=="PINCH":
-                mouse_flag = non_dom_state.pose_flags.get("PINCH", False)
-        mouse_active = bool(mouse_flag) if mouse_enabled else False
-        if mouse_active:
-            one_hand_active=False
-        if not mouse_active:
+        def _trigger_fired(trig):
+            nonlocal both_pose_latched
+            gesture=trig.get("gesture")
+            hand=trig.get("hand")
+            if not gesture:
+                return False
+            if hand=="non_dominant":
+                return non_dom_event==gesture
+            if hand=="dominant":
+                return dom_event==gesture
+            if hand=="either":
+                return (dom_event==gesture) or (non_dom_event==gesture)
+            if hand=="both":
+                active=bool(right and left and gR.pose_flags.get(gesture,False) and gL.pose_flags.get(gesture,False))
+                if not active:
+                    both_pose_latched[gesture]=False
+                    return False
+                if both_pose_latched.get(gesture):
+                    return False
+                both_pose_latched[gesture]=True
+                return True
+            if hand=="right":
+                return evR==gesture
+            if hand=="left":
+                return evL==gesture
+            return False
+
+        time_since_change=now_ms-mode_last_change_ms
+
+        if current_mode!="idle" and _trigger_fired(mode_triggers["exit"]):
+            switch_mode("idle", now_ms, force_reset=True)
+        elif _trigger_fired(mode_triggers["record"]) and time_since_change>=mode_refractory_ms:
+            if current_mode=="record":
+                switch_mode("record", now_ms, force_reset=True)
+            else:
+                switch_mode("record", now_ms)
+        elif mouse_enabled and _trigger_fired(mode_triggers["mouse"]) and time_since_change>=mode_refractory_ms and current_mode!="mouse":
+            switch_mode("mouse", now_ms)
+        elif one_enabled and _trigger_fired(mode_triggers["one_hand"]) and time_since_change>=mode_refractory_ms and current_mode!="one_hand":
+            switch_mode("one_hand", now_ms)
+
+        if current_mode!="mouse":
             mouse_prev=None
             if mouse_left_down:
                 mouse_release("left"); mouse_left_down=False
             if mouse_right_down:
                 mouse_release("right"); mouse_right_down=False
-
-        # Start by two palms
-        both_open = (gR.pose_flags.get("OPEN_PALM",False) and gL.pose_flags.get("OPEN_PALM",False))
-        if not seq_active and both_open and not (one_block_sequences and one_hand_active) and not mouse_active:
-            seq_active=True; seq_buffer.clear(); pending_R=None; last_evt_ms=now_ms
-            print("[SEQ] Режим ввода: СТАРТ")
 
         if one_hand_active and not seq_active and dom_event and dom_present and not mouse_active:
             combo=single_map.get(dom_event)
@@ -273,7 +364,8 @@ def main():
             else:
                 print(f"[SEQ-COMMIT] Нет маппинга для: {key}")
             seq_buffer.clear(); pending_R=None; last_evt_ms=now_ms
-            if exit_on_commit: seq_active=False
+            if exit_on_commit:
+                switch_mode("idle", now_ms, force_reset=True)
 
         # OSD text
         if seq_active:
