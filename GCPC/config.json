@@ -57,8 +57,8 @@
     "smoothing_alpha": 0.25,
     "pointer_hand": "dominant",
     "pointer_landmark": 8,
-    "left_click_binding": "DOMINANT-SINGLE-FIST",
-    "right_click_binding": "DOMINANT-SINGLE-OPEN_PALM"
+    "left_click_binding": "NON_DOMINANT-SINGLE-PINCH_TAP",
+    "right_click_binding": "NON_DOMINANT-SINGLE-THUMBS_UP"
   },
   "mode_switches": {
     "refractory_ms": 800,
