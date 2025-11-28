@@ -2,6 +2,7 @@
 # Minimal OneEuro filter for smoothing 2D landmarks
 import math, time
 
+
 class LowPass:
     def __init__(self, alpha, x0=None):
         self.y = x0
@@ -17,7 +18,9 @@ def alpha(cutoff, dt):
     tau = 1.0 / (2.0 * math.pi * cutoff)
     return 1.0 / (1.0 + tau/dt)
 
+
 class OneEuro:
+
     def __init__(self, min_cutoff=1.0, beta=0.0, d_cutoff=1.0):
         self.min_cutoff = min_cutoff
         self.beta = beta
@@ -26,6 +29,7 @@ class OneEuro:
         self.t_prev = None
         self.dx_filt = None
         self.x_filt = None
+
     def apply(self, x, t=None):
         if t is None:
             t = time.time()

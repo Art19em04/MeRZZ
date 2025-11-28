@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import time, ctypes
 from ctypes import wintypes
+
 if not hasattr(wintypes, "ULONG_PTR"): wintypes.ULONG_PTR = wintypes.WPARAM
 ULONG_PTR=wintypes.ULONG_PTR; DWORD=wintypes.DWORD; WORD=wintypes.WORD; LONG=wintypes.LONG
 INPUT_MOUSE=0; INPUT_KEYBOARD=1; INPUT_HARDWARE=2
@@ -9,12 +10,16 @@ MOUSEEVENTF_MOVE=0x0001; MOUSEEVENTF_LEFTDOWN=0x0002; MOUSEEVENTF_LEFTUP=0x0004
 MOUSEEVENTF_RIGHTDOWN=0x0008; MOUSEEVENTF_RIGHTUP=0x0010; MOUSEEVENTF_ABSOLUTE=0x8000
 MOUSEEVENTF_VIRTUALDESK=0x4000
 MAPVK_VK_TO_VSC=0
+
 class KEYBDINPUT(ctypes.Structure):
     _fields_=[('wVk',WORD),('wScan',WORD),('dwFlags',DWORD),('time',DWORD),('dwExtraInfo',ULONG_PTR)]
+
 class MOUSEINPUT(ctypes.Structure):
     _fields_=[('dx',LONG),('dy',LONG),('mouseData',DWORD),('dwFlags',DWORD),('time',DWORD),('dwExtraInfo',ULONG_PTR)]
+
 class HARDWAREINPUT(ctypes.Structure):
     _fields_=[('uMsg',DWORD),('wParamL',WORD),('wParamH',WORD)]
+
 class INPUT(ctypes.Structure):
     class _INPUT(ctypes.Union):
         _fields_=[('ki',KEYBDINPUT),('mi',MOUSEINPUT),('hi',HARDWAREINPUT)]
@@ -26,14 +31,20 @@ VK={'BACK':0x08,'TAB':0x09,'ENTER':0x0D,'SHIFT':0x10,'CTRL':0x11,'ALT':0x12,'PAU
     'A':0x41,'B':0x42,'C':0x43,'D':0x44,'E':0x45,'F':0x46,'G':0x47,'H':0x48,'I':0x49,'J':0x4A,'K':0x4B,'L':0x4C,'M':0x4D,'N':0x4E,'O':0x4F,'P':0x50,'Q':0x51,'R':0x52,'S':0x53,'T':0x54,'U':0x55,'V':0x56,'W':0x57,'X':0x58,'Y':0x59,'Z':0x5A,
     'LWIN':0x5B,'RWIN':0x5C,'APPS':0x5D,'F1':0x70,'F2':0x71,'F3':0x72,'F4':0x73,'F5':0x74,'F6':0x75,'F7':0x76,'F8':0x77,'F9':0x78,'F10':0x79,'F11':0x7A,'F12':0x7B}
 EXTENDED_VK=set([VK.get(k,0) for k in ['INS','DEL','HOME','END','PGUP','PGDN','LEFT','RIGHT','UP','DOWN'] if k in VK])
+
+
 def _key_event(vk,is_down=True,use_scan=False):
     scan=MapVirtualKey(vk,MAPVK_VK_TO_VSC)
     flags=(KEYEVENTF_SCANCODE if use_scan else 0) | (0 if is_down else KEYEVENTF_KEYUP)
     if vk in EXTENDED_VK: flags |= KEYEVENTF_EXTENDEDKEY
     ki=KEYBDINPUT(0 if use_scan else vk, 0 if not use_scan else scan, flags, 0, 0)
     return INPUT(type=INPUT_KEYBOARD, ki=ki)
+
+
 def _mouse_input(dx=0, dy=0, data=0, flags=0):
     return INPUT(type=INPUT_MOUSE, mi=MOUSEINPUT(dx, dy, data, flags, 0, 0))
+
+
 def _send_inputs(ins, delay=0.02):
     if not ins:
         return
@@ -41,6 +52,8 @@ def _send_inputs(ins, delay=0.02):
     SendInput(len(ins), arr, ctypes.sizeof(INPUT))
     if delay:
         time.sleep(delay)
+
+
 def _parse_combo(combo):
     parts=[p.strip().upper() for p in combo.split('+') if p.strip()]; mods=[]; main=None
     for p in parts:
@@ -55,6 +68,8 @@ def _parse_combo(combo):
     main_vk=_vk(main) if main else None
     mod_vks=[_vk(m) for m in mods]
     return mod_vks, main_vk
+
+
 def press_combo(combo, prefer_scan=False):
     mod_vks, main_vk = _parse_combo(combo)
     evts=[]
@@ -64,13 +79,19 @@ def press_combo(combo, prefer_scan=False):
         evts.append(_key_event(main_vk, False, prefer_scan))
     for vk in reversed(mod_vks): evts.append(_key_event(vk, False, prefer_scan))
     _send_inputs(evts)
+
+
 def _norm_coord(v):
     return max(0, min(65535, int(round(v * 65535.0))))
+
+
 def mouse_move_normalized(x, y):
     xi=_norm_coord(x)
     yi=_norm_coord(y)
     flags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
     _send_inputs([_mouse_input(dx=xi, dy=yi, flags=flags)], delay=0.0)
+
+
 def mouse_press(button="left"):
     btn=button.lower()
     if btn=="left":
@@ -80,6 +101,8 @@ def mouse_press(button="left"):
     else:
         raise ValueError(f"Unsupported mouse button: {button}")
     _send_inputs([_mouse_input(flags=flags)], delay=0.0)
+
+
 def mouse_release(button="left"):
     btn=button.lower()
     if btn=="left":
