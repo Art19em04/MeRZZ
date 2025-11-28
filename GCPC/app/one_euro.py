@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 # Minimal OneEuro filter for smoothing 2D landmarks
-import math, time
+import math
+import time
 
 
 class LowPass:
     def __init__(self, alpha, x0=None):
         self.y = x0
         self.a = alpha
+
     def apply(self, x):
         if self.y is None:
             self.y = x
@@ -14,9 +16,10 @@ class LowPass:
             self.y = self.a * x + (1.0 - self.a) * self.y
         return self.y
 
+
 def alpha(cutoff, dt):
     tau = 1.0 / (2.0 * math.pi * cutoff)
-    return 1.0 / (1.0 + tau/dt)
+    return 1.0 / (1.0 + tau / dt)
 
 
 class OneEuro:
@@ -34,7 +37,7 @@ class OneEuro:
         if t is None:
             t = time.time()
         if self.t_prev is None:
-            dt = 1/60.0
+            dt = 1 / 60.0
         else:
             dt = max(1e-4, t - self.t_prev)
         self.t_prev = t

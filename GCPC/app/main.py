@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-import os
 import json
+import os
 import time
+
 import cv2
 from PySide6 import QtWidgets
 
@@ -660,7 +661,8 @@ def main():
                 last_R_label = evR
         else:
             gR.pose_flags.clear()
-            if seq_active and seq_input_side == "RIGHT" and cancel_exit_ms > 0 and (now_ms - last_seen_R) >= cancel_exit_ms:
+            if seq_active and seq_input_side == "RIGHT" and cancel_exit_ms > 0 and (
+                    now_ms - last_seen_R) >= cancel_exit_ms:
                 seq_buffer.clear()
                 seq_pending = None
                 if auto_exit:
@@ -676,7 +678,8 @@ def main():
                 last_L_label = evL
         else:
             gL.pose_flags.clear()
-            if seq_active and seq_input_side == "LEFT" and cancel_exit_ms > 0 and (now_ms - last_seen_L) >= cancel_exit_ms:
+            if seq_active and seq_input_side == "LEFT" and cancel_exit_ms > 0 and (
+                    now_ms - last_seen_L) >= cancel_exit_ms:
                 seq_buffer.clear()
                 seq_pending = None
                 if auto_exit:
@@ -687,6 +690,7 @@ def main():
 
         dom_event = evR if dominant_side == "RIGHT" else evL
         support_event = evR if support_side == "RIGHT" else evL
+
         def _trigger_fired(trig):
             nonlocal both_pose_latched
             gesture = trig.get("gesture")
@@ -697,7 +701,8 @@ def main():
             if not hand:
                 return False
             if hand == "BOTH":
-                active = bool(right and left and gR.pose_flags.get(gesture, False) and gL.pose_flags.get(gesture, False))
+                active = bool(
+                    right and left and gR.pose_flags.get(gesture, False) and gL.pose_flags.get(gesture, False))
                 if not active:
                     both_pose_latched[gesture] = False
                     return False
@@ -841,7 +846,8 @@ def main():
             candidate = seq_last_label
             if candidate and candidate not in candidate_ignore:
                 prev_candidate = seq_pending
-                if (prev_candidate is None) or (prev_candidate != candidate and (now_ms - last_seq_event_ms) >= arm_delay_ms):
+                if (prev_candidate is None) or (
+                        prev_candidate != candidate and (now_ms - last_seq_event_ms) >= arm_delay_ms):
                     seq_pending = candidate
                     last_seq_event_ms = now_ms
 
@@ -868,9 +874,9 @@ def main():
                 if state.pose_flags.get(undo_start, False):
                     undo_open_ts[side_name] = now_ms
                 if (
-                    state.pose_flags.get(undo_end, False)
-                    and undo_open_ts.get(side_name)
-                    and (now_ms - undo_open_ts[side_name]) <= undo_window_ms
+                        state.pose_flags.get(undo_end, False)
+                        and undo_open_ts.get(side_name)
+                        and (now_ms - undo_open_ts[side_name]) <= undo_window_ms
                 ):
                     if seq_buffer:
                         popped = seq_buffer.pop()
@@ -958,4 +964,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
