@@ -46,17 +46,14 @@ class OneEuro:
         else:
             dt = max(1e-4, t - self.t_prev)
         self.t_prev = t
-        # derivative
         dx = x if self.x_prev is None else (x - self.x_prev) / dt
         self.x_prev = x
-        # smooth derivative
         if self.dx_filt is None:
             self.dx_filt = LowPass(alpha(self.d_cutoff, dt), dx)
             dx_hat = dx
         else:
             self.dx_filt.a = alpha(self.d_cutoff, dt)
             dx_hat = self.dx_filt.apply(dx)
-        # dynamic cutoff
         cutoff = self.min_cutoff + self.beta * abs(dx_hat)
         if self.x_filt is None:
             self.x_filt = LowPass(alpha(cutoff, dt), x)

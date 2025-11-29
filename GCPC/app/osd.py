@@ -13,15 +13,15 @@ class OSD(QtWidgets.QWidget):
         super().__init__(None, QtCore.Qt.FramelessWindowHint | QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
         self.setWindowFlag(QtCore.Qt.WindowDoesNotAcceptFocus, True)
-        self.text_main = "";
+        self.text_main = ""
         self.text_sub = ""
         self.font_main = QtGui.QFont("Segoe UI", 12, QtGui.QFont.Bold)
         self.font_sub = QtGui.QFont("Segoe UI", 10)
-        self._install_click_through();
+        self._install_click_through()
         self._resize_top()
-        self.timer = QtCore.QTimer(self);
-        self.timer.setInterval(33);
-        self.timer.timeout.connect(self.update);
+        self.timer = QtCore.QTimer(self)
+        self.timer.setInterval(33)
+        self.timer.timeout.connect(self.update)
         self.timer.start()
 
     def _install_click_through(self):
@@ -36,7 +36,7 @@ class OSD(QtWidgets.QWidget):
     def _resize_top(self):
         """Stretch the overlay across the top of the primary screen."""
         scr = QtWidgets.QApplication.primaryScreen().availableGeometry()
-        self.setGeometry(scr.left(), scr.top(), scr.width(), 52)
+        self.setGeometry(scr.left(), scr.top(), round(scr.width() / 3), 52)
 
     def set_text(self, main, sub=""):
         """Update displayed main and secondary text."""

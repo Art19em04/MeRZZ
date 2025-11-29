@@ -127,7 +127,7 @@ class LandmarkONNX:
         x = np.transpose(x, (2, 0, 1))[None, ...]
         return x
 
-    @staticmethod
+
     def _argmax2d(hm):
         """Locate maximum in heatmap and return normalized coords/value."""
         H, W = hm.shape
@@ -143,7 +143,8 @@ class LandmarkONNX:
         conf = 1.0
         if y.ndim == 3 and y.shape[0] == 1 and y.shape[1] == 21 and y.shape[2] in (2, 3):
             pts = [(float(y[0, i, 0]), float(y[0, i, 1])) for i in range(21)]
-            if y.shape[2] == 3: conf = float(np.mean(np.clip(y[0, :, 2], 0, 1)))
+            if y.shape[2] == 3:
+                conf = float(np.mean(np.clip(y[0, :, 2], 0, 1)))
         elif y.ndim == 2 and y.shape[0] == 1 and y.shape[1] in (42, 63):
             has_z = (y.shape[1] == 63)
             flat = y.reshape(-1)
@@ -168,7 +169,6 @@ class LandmarkONNX:
         out = self.sess.run(self.out_names, {self.inp.name: x})
         pts01, conf = self._parse(out)
         if pts01 is None: return None, 0.0
-        # map crop norm -> image coords
         x1, y1, x2, y2 = bbox_xyxy
         bw, bh = max(1.0, x2 - x1), max(1.0, y2 - y1)
         lm = []
@@ -179,7 +179,6 @@ class LandmarkONNX:
                 X = self.filters[i * 2 + 0].apply(X)
                 Y = self.filters[i * 2 + 1].apply(Y)
             lm.append((float(X), float(Y)))
-        # normalize to [0..1] later in main
         return lm, float(conf)
 
 

@@ -2,6 +2,7 @@
 import json
 import os
 import time
+from mmap import error
 
 import cv2
 from PySide6 import QtWidgets
@@ -21,33 +22,22 @@ def load_config():
         return json.load(f)
 
 
-def _normalize_hand_choice(value, fallback):
-    """Normalize user provided hand value to LEFT/RIGHT tokens."""
-    if value is None:
-        return fallback
-    token = str(value).strip().lower()
-    if token in ("right", "r"):
-        return "RIGHT"
-    if token in ("left", "l"):
-        return "LEFT"
-    return fallback
-
-
 def build_hands(cfg):
     """Construct a mapping describing dominant and support hands."""
-    hands_cfg = cfg.get("hands", {}) if isinstance(cfg.get("hands"), dict) else {}
-    dominant_raw = hands_cfg.get("dominant", cfg.get("dominant_hand", "right"))
-    dominant = _normalize_hand_choice(dominant_raw, "RIGHT")
-    support = _normalize_hand_choice(hands_cfg.get("support"), None)
-    if support not in ("LEFT", "RIGHT"):
-        support = "LEFT" if dominant == "RIGHT" else "RIGHT"
+    hands_cfg = cfg.get("hands")
+    dominant = hands_cfg.get("dominant")
+    if dominant != "RIGHT" and dominant != "LEFT":
+        raise ValueError("[CFG ERR] INCORRECT DOMINANT HAND")
+    support = hands_cfg.get("support")
+    if dominant != "RIGHT" and dominant != "LEFT":
+        raise ValueError("[CFG ERR] INCORRECT SUPPORT HAND")
     return {"dominant": dominant, "support": support}
 
 
 def resolve_side(tag, hands):
     """Resolve textual hand tag into a concrete side using provided defaults."""
-    dominant_side = hands.get("dominant", "RIGHT")
-    support_side = hands.get("support") or ("LEFT" if dominant_side == "RIGHT" else "RIGHT")
+    dominant_side = hands.get("dominant")
+    support_side = hands.get("support")
     if tag is None:
         return dominant_side
     tag = str(tag).strip().upper()
@@ -55,12 +45,10 @@ def resolve_side(tag, hands):
         return dominant_side
     if tag in ("RIGHT", "LEFT", "BOTH", "EITHER", "ANY"):
         return tag
-    if tag in ("DOMINANT", "MAIN", "PRIMARY"):
+    if tag == "DOMINANT":
         return dominant_side
-    if tag in ("NON_DOMINANT", "NON-DOMINANT", "OFFHAND", "SUPPORT", "SECONDARY", "AUXILIARY", "FUNCTIONAL"):
+    if tag == "NON_DOMINANT":
         return support_side
-    if tag in ("OPPOSITE", "OTHER"):
-        return support_side if support_side != dominant_side else dominant_side
     return tag or dominant_side
 
 
@@ -76,15 +64,14 @@ def parse_mapping_key(raw_key, hands):
     the sequence track, then expect the same hand to perform ``SWIPE_RIGHT``
     as the next sequence gesture".
     """
-    if not isinstance(raw_key, str):
-        return None
-    steps = [step.strip() for step in raw_key.split(">")]
+    steps = raw_key.replace(" ", "").split(">")
     gestures = []
     side = None
+
     for idx, step in enumerate(steps):
         if not step:
             continue
-        tokens = [tok.strip().upper() for tok in step.split("-") if tok.strip()]
+        tokens = step.replace(" ", "").upper().split("-")
         if not tokens:
             continue
         first = tokens[0]
@@ -109,23 +96,12 @@ def parse_mapping_key(raw_key, hands):
 
 def lookup_mapping(table, side, key):
     """Look up mapping entry prioritizing specific hand side and fallbacks."""
-    if not table:
+    if not table or not side:
         return None
-    order = []
-    if side:
-        order.append(side)
-    if side != "EITHER":
-        order.append("EITHER")
-    order.append("ANY")
-    seen = set()
-    for cand in order:
-        if cand in seen:
-            continue
-        seen.add(cand)
-        bucket = table.get(cand)
-        if bucket and key in bucket:
-            return bucket[key]
-    return None
+    bucket = table.get(side)
+    if bucket is None:
+        return None
+    return bucket.get(key)
 
 
 class DebouncedTrigger:
@@ -163,19 +139,25 @@ def open_camera(idx, w, h):
             if ok:
                 return cap
             cap.release()
-        return None
+        raise ValueError("[DEVICE] WRONG DEVICE SETTINGS")
+
+    def probe():
+        for probe in range(0, 6):
+            for api in (cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY):
+                cap = try_open(probe, api)
+                if cap:
+                    print(f"[videoio] open idx={probe} api={api}")
+                    return cap
 
     for api in (cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY):
         cap = try_open(idx, api)
         if cap:
             print(f"[videoio] open idx={idx} api={api}")
             return cap
-    for probe in range(0, 6):
-        for api in (cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY):
-            cap = try_open(probe, api)
-            if cap:
-                print(f"[videoio] open idx={probe} api={api}")
-                return cap
+
+    if idx == -1:
+        probe()
+
     return None
 
 
@@ -183,13 +165,11 @@ def draw_landmarks(frame, lm):
     """Draw simple circles for each landmark on a frame in-place."""
     h, w = frame.shape[:2]
     for (x, y) in lm:
-        cv2.circle(frame, (int(x * w), int(y * h)), 3, (0, 255, 0), -1)
+        cv2.circle(frame, (int(x * w), int(y * h)), 4, (0, 255, 0), -1)
 
 
 def main():
-    """Entry point that wires camera input, gesture tracking, and OS controls."""
     cfg = load_config()
-    app = QtWidgets.QApplication([])
     osd = OSD()
     osd.show()
 
@@ -451,9 +431,9 @@ def main():
     one_status_label = one_cfg.get("status_label") or "ONE-HAND"
     one_active_hint = one_cfg.get("active_hint")
     dispatch_side = resolve_side(one_cfg.get("dispatch_hand", "dominant"), hands)
-        if not one_active_hint:
-            trig_label = _trigger_label(mode_triggers["one_hand"])
-            one_active_hint = f"{trig_label} → SINGLE" if trig_label else "ONE-HAND"
+    if not one_active_hint:
+        trig_label = _trigger_label(mode_triggers["one_hand"])
+        one_active_hint = f"{trig_label} → SINGLE" if trig_label else "ONE-HAND"
 
     def _binding_active(binding, right_present, left_present, event_right, event_left):
         """Check whether gesture binding is satisfied given hand presence and events."""
