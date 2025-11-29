@@ -22,11 +22,13 @@ THUMB_MCP = 2
 
 
 def _dist(a, b):
+    """Compute Euclidean distance between two 2D points."""
     dx, dy = a[0] - b[0], a[1] - b[1]
     return (dx * dx + dy * dy) ** 0.5
 
 
 def _angle(a, b, c):
+    """Return angle ABC in radians for three 2D points."""
     ab = (a[0] - b[0], a[1] - b[1]);
     cb = (c[0] - b[0], c[1] - b[1])
     dot = ab[0] * cb[0] + ab[1] * cb[1];
@@ -39,6 +41,7 @@ def _angle(a, b, c):
 
 
 def finger_flexion(lm):
+    """Estimate flexion level (0..1) for each finger based on landmarks."""
     def straight(tip, pip, mcp):
         ang = _angle(lm[tip], lm[pip], lm[mcp])
         return 1.0 - (ang / math.pi)
@@ -49,6 +52,7 @@ def finger_flexion(lm):
 
 
 class GestureState:
+    """Tracks gesture-related state and emits gesture events from landmarks."""
     def __init__(self, cfg):
         self.cfg = cfg
         self.last_emit_global = 0.0
@@ -59,6 +63,7 @@ class GestureState:
         self.pose_flags = {}
 
     def _can_emit(self, name, now):
+        """Check cooldown timers to decide if gesture can be emitted."""
         cd = float(self.cfg.get("cooldown_ms", 300))
         if now - self.last_emit_global < cd: return False
         need = float(self.cfg.get("per_gesture_min_ms", {}).get(name, cd))
@@ -66,10 +71,12 @@ class GestureState:
         return True
 
     def _mark_emit(self, name, now):
+        """Record emission timestamps for cooldown tracking."""
         self.last_emit_global = now
         self.last_emit_per[name] = now
 
     def update_and_classify(self, lm):
+        """Update gesture state from landmarks and return detected gesture name."""
         now = time.time() * 1000.0
         self.wrist_hist.append((now, lm[WRIST]))
         swipe = None

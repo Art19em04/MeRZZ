@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 class MediaPipeHandTracker:
+    """Wrapper around MediaPipe Hands providing a common tracker interface."""
     def __init__(self, min_det=0.6, min_trk=0.5, max_hands=2, model_complexity=1):
         import mediapipe as mp
         self.mp = mp
@@ -13,6 +14,7 @@ class MediaPipeHandTracker:
         )
 
     def process(self, rgb):
+        """Run MediaPipe on an RGB frame and return normalized landmarks."""
         # Mediapipe ожидает RGB без копии, но важно не использовать cv2.cvtColor тут
         results = self.hands.process(rgb)
         out = []
