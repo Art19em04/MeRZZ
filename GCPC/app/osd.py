@@ -8,6 +8,7 @@ WS_EX_TRANSPARENT = 0x00000020
 
 
 class OSD(QtWidgets.QWidget):
+    """On-screen display widget showing current mode and hints."""
     def __init__(self):
         super().__init__(None, QtCore.Qt.FramelessWindowHint | QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
@@ -24,6 +25,7 @@ class OSD(QtWidgets.QWidget):
         self.timer.start()
 
     def _install_click_through(self):
+        """Allow mouse clicks to pass through the widget."""
         hwnd = int(self.winId())
         GWL_EXSTYLE = -20
         GetWindowLong = ctypes.windll.user32.GetWindowLongW
@@ -32,15 +34,18 @@ class OSD(QtWidgets.QWidget):
         SetWindowLong(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED | WS_EX_TRANSPARENT)
 
     def _resize_top(self):
+        """Stretch the overlay across the top of the primary screen."""
         scr = QtWidgets.QApplication.primaryScreen().availableGeometry()
         self.setGeometry(scr.left(), scr.top(), scr.width(), 52)
 
     def set_text(self, main, sub=""):
+        """Update displayed main and secondary text."""
         self.text_main = main or ""
         self.text_sub = sub or ""
         self.update()
 
     def paintEvent(self, e):
+        """Render overlay background and text."""
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         r = self.rect()
@@ -57,5 +62,6 @@ class OSD(QtWidgets.QWidget):
         p.drawText(r.adjusted(12, 26, -12, -8), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, self.text_sub)
 
     def showEvent(self, e):
+        """Ensure overlay is resized when shown."""
         super().showEvent(e)
         self._resize_top()

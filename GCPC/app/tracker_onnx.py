@@ -8,6 +8,7 @@ import onnxruntime as ort
 
 
 def _is_nchw(shape):
+    """Heuristically decide if ONNX model uses NCHW layout."""
     if len(shape) != 4: return True
     if shape[1] == 3: return True
     if shape[-1] == 3: return False
@@ -15,6 +16,7 @@ def _is_nchw(shape):
 
 
 def _input_hw(shape, is_nchw):
+    """Extract expected input height/width from ONNX input shape."""
     if is_nchw:
         H = shape[2] if len(shape) > 2 and isinstance(shape[2], int) and shape[2] > 0 else 256
         W = shape[3] if len(shape) > 3 and isinstance(shape[3], int) and shape[3] > 0 else 256
@@ -25,6 +27,7 @@ def _input_hw(shape, is_nchw):
 
 
 def _letterbox(rgb, out_h, out_w):
+    """Resize with padding to preserve aspect ratio and return metadata."""
     ih, iw = rgb.shape[:2]
     s = min(out_w / iw, out_h / ih)
     nw, nh = int(round(iw * s)), int(round(ih * s))
@@ -37,6 +40,7 @@ def _letterbox(rgb, out_h, out_w):
 
 
 def _map_to_original(xy_list, meta, assume_norm01=True):
+    """Map normalized points from letterboxed space back to original image."""
     out = []
     iw, ih = meta["in_w"], meta["in_h"]
     ow, oh = meta["out_w"], meta["out_h"]
@@ -57,6 +61,7 @@ def _map_to_original(xy_list, meta, assume_norm01=True):
 
 
 def _argmax2d(hm):
+    """Find maximum value in heatmap and return normalized coordinates."""
     H, W = hm.shape
     idx = int(np.argmax(hm))
     y, x = divmod(idx, W)
@@ -65,6 +70,7 @@ def _argmax2d(hm):
 
 
 class ONNXHandTracker:
+    """ONNX-based hand landmark tracker expecting only landmark model."""
     def __init__(self, models_dir="models"):
         mp = os.environ.get("HAND_ONNX_PATH", "").strip() or os.path.join(models_dir, "hand_landmarks.onnx")
         if not os.path.isfile(mp):
@@ -85,6 +91,7 @@ class ONNXHandTracker:
         self.input_std = (1.0, 1.0, 1.0)
 
     def _pre(self, rgb):
+        """Preprocess RGB frame for ONNX inference and return meta data."""
         lb, meta = _letterbox(rgb, self.in_h, self.in_w)
         x = lb.astype(np.float32) * self.input_scale
         if any(abs(m) > 1e-6 for m in self.input_mean) or any(abs(s - 1) > 1e-6 for s in self.input_std):
@@ -97,12 +104,14 @@ class ONNXHandTracker:
 
     @staticmethod
     def _handed(lm):
+        """Infer hand label from landmarks order (rough heuristic)."""
         try:
             return "Right" if lm[4][0] > lm[20][0] else "Left"
         except Exception:
             return "Unknown"
 
     def _parse(self, y, meta):
+        """Convert raw ONNX outputs to normalized landmark structures."""
         y = y[0]
         lm = None
         score = 1.0
@@ -137,6 +146,7 @@ class ONNXHandTracker:
         return [{"lm": lm, "label": self._handed(lm), "score": float(score)}]
 
     def process(self, rgb):
+        """Run ONNX landmark model on RGB frame and return detections."""
         if rgb is None or rgb.ndim != 3 or rgb.shape[2] != 3: return []
         x, meta = self._pre(rgb)
         out = self.sess.run(None, {self.input_name: x})

@@ -16,11 +16,13 @@ ROOT = os.path.dirname(APP_DIR)
 
 
 def load_config():
+    """Load application configuration from the root config.json file."""
     with open(os.path.join(ROOT, "config.json"), "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _normalize_hand_choice(value, fallback):
+    """Normalize user provided hand value to LEFT/RIGHT tokens."""
     if value is None:
         return fallback
     token = str(value).strip().lower()
@@ -32,6 +34,7 @@ def _normalize_hand_choice(value, fallback):
 
 
 def build_hands(cfg):
+    """Construct a mapping describing dominant and support hands."""
     hands_cfg = cfg.get("hands", {}) if isinstance(cfg.get("hands"), dict) else {}
     dominant_raw = hands_cfg.get("dominant", cfg.get("dominant_hand", "right"))
     dominant = _normalize_hand_choice(dominant_raw, "RIGHT")
@@ -42,6 +45,7 @@ def build_hands(cfg):
 
 
 def resolve_side(tag, hands):
+    """Resolve textual hand tag into a concrete side using provided defaults."""
     dominant_side = hands.get("dominant", "RIGHT")
     support_side = hands.get("support") or ("LEFT" if dominant_side == "RIGHT" else "RIGHT")
     if tag is None:
@@ -104,6 +108,7 @@ def parse_mapping_key(raw_key, hands):
 
 
 def lookup_mapping(table, side, key):
+    """Look up mapping entry prioritizing specific hand side and fallbacks."""
     if not table:
         return None
     order = []
@@ -124,6 +129,7 @@ def lookup_mapping(table, side, key):
 
 
 class DebouncedTrigger:
+    """Utility that fires after a dwell time while respecting a refractory window."""
     def __init__(self, dwell_ms=260, refractory_ms=900):
         self.dwell_ms = dwell_ms
         self.refractory_ms = refractory_ms
@@ -131,6 +137,7 @@ class DebouncedTrigger:
         self.last_fire = 0
 
     def update(self, now_ms, active):
+        """Return True when active has stayed asserted long enough to trigger."""
         if not active:
             self.candidate_since = None
             return False
@@ -145,7 +152,9 @@ class DebouncedTrigger:
 
 
 def open_camera(idx, w, h):
+    """Try to open camera by preferred index with fallbacks across APIs."""
     def try_open(i, api):
+        """Attempt to open a specific camera index using selected backend."""
         cap = cv2.VideoCapture(i, api)
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
@@ -171,12 +180,14 @@ def open_camera(idx, w, h):
 
 
 def draw_landmarks(frame, lm):
+    """Draw simple circles for each landmark on a frame in-place."""
     h, w = frame.shape[:2]
     for (x, y) in lm:
         cv2.circle(frame, (int(x * w), int(y * h)), 3, (0, 255, 0), -1)
 
 
 def main():
+    """Entry point that wires camera input, gesture tracking, and OS controls."""
     cfg = load_config()
     app = QtWidgets.QApplication([])
     osd = OSD()
@@ -222,6 +233,7 @@ def main():
     candidate_ignore = {str(g).upper() for g in seq_ctrl.get("candidate_ignore", ["OPEN_PALM", "FIST"])}
 
     def _binding_from_string(raw_binding):
+        """Parse user-facing binding string into hand side and gesture tuple."""
         if not isinstance(raw_binding, str):
             return None
         parsed = parse_mapping_key(raw_binding, hands)
@@ -233,7 +245,9 @@ def main():
         return side, gestures
 
     def _parse_single_binding(raw_value, default_binding, default_hand, default_gesture):
+        """Normalize single-gesture binding configuration to a dict."""
         def _fallback():
+            """Return default single-gesture binding when parsing fails."""
             return {
                 "hand": resolve_side(default_hand, hands),
                 "gesture": str(default_gesture).upper(),
@@ -257,7 +271,9 @@ def main():
         return _fallback()
 
     def _parse_sequence_binding(raw_value, default_binding, default_hand, default_gestures):
+        """Normalize sequence binding configuration to a dict with gestures list."""
         def _fallback():
+            """Return default sequence binding when parsing fails."""
             return {
                 "hand": resolve_side(default_hand, hands),
                 "gestures": [str(g).upper() for g in default_gestures],
@@ -374,6 +390,7 @@ def main():
     mode_refractory_ms = int(mode_cfg.get("refractory_ms", 800))
 
     def _parse_trigger(name, default_binding, default_hand, default_gesture):
+        """Build a trigger binding from mode config with sensible defaults."""
         entry = mode_cfg.get(name)
         binding = _parse_single_binding(entry, default_binding, default_hand, default_gesture)
         binding["gesture"] = binding["gesture"].upper()
@@ -387,6 +404,7 @@ def main():
     }
 
     def _trigger_label(trig):
+        """Format human readable label for trigger binding."""
         gesture = trig.get("gesture", "")
         if not gesture:
             return ""
@@ -405,6 +423,7 @@ def main():
         return f"{prefix} {gesture_txt}".strip()
 
     def _hand_token_label(side):
+        """Convert hand token to consistent label honoring dominant/support roles."""
         if not side:
             return "DOMINANT"
         side = side.upper()
@@ -417,6 +436,7 @@ def main():
         return side
 
     def _binding_notation(binding, context="SINGLE"):
+        """Compose notation string like DOMINANT-SINGLE-GESTURE for display."""
         if not binding:
             return ""
         gesture = binding.get("gesture") or ""
@@ -431,11 +451,12 @@ def main():
     one_status_label = one_cfg.get("status_label") or "ONE-HAND"
     one_active_hint = one_cfg.get("active_hint")
     dispatch_side = resolve_side(one_cfg.get("dispatch_hand", "dominant"), hands)
-    if not one_active_hint:
-        trig_label = _trigger_label(mode_triggers["one_hand"])
-        one_active_hint = f"{trig_label} → SINGLE" if trig_label else "ONE-HAND"
+        if not one_active_hint:
+            trig_label = _trigger_label(mode_triggers["one_hand"])
+            one_active_hint = f"{trig_label} → SINGLE" if trig_label else "ONE-HAND"
 
     def _binding_active(binding, right_present, left_present, event_right, event_left):
+        """Check whether gesture binding is satisfied given hand presence and events."""
         if not binding:
             return False
         gesture = binding.get("gesture")
@@ -445,6 +466,7 @@ def main():
         gesture = str(gesture).upper()
 
         def _side_active(side_name):
+            """Return True if specific side has active pose or event."""
             if side_name == "RIGHT":
                 if not right_present:
                     return False
@@ -489,6 +511,7 @@ def main():
         pointer_landmark = 8
 
     def _read_mouse_binding(key, legacy_key, default_binding, default_hand, default_gesture):
+        """Resolve mouse control binding supporting legacy config keys."""
         raw_value = mouse_cfg.get(key)
         display_source = raw_value
         if raw_value is None and legacy_key:
@@ -569,6 +592,7 @@ def main():
     both_pose_latched = {}
 
     def switch_mode(new_mode, now_ms, force_reset=False):
+        """Transition between operation modes and reset related state when needed."""
         nonlocal current_mode, seq_active, one_hand_active, mouse_active
         nonlocal mouse_prev, mouse_left_down, mouse_right_down
         nonlocal last_single_action, seq_buffer, seq_pending, last_evt_ms, mode_last_change_ms
@@ -692,6 +716,7 @@ def main():
         support_event = evR if support_side == "RIGHT" else evL
 
         def _trigger_fired(trig):
+            """Return True when a mode trigger gesture has just been activated."""
             nonlocal both_pose_latched
             gesture = trig.get("gesture")
             hand = trig.get("hand")
@@ -870,6 +895,7 @@ def main():
 
         if seq_active:
             def _update_undo_for_side(side_name):
+                """Handle undo gesture sequence for a specific hand side."""
                 state = gR if side_name == "RIGHT" else gL
                 if state.pose_flags.get(undo_start, False):
                     undo_open_ts[side_name] = now_ms

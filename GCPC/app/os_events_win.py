@@ -63,6 +63,7 @@ EXTENDED_VK = set(
 
 
 def _key_event(vk, is_down=True, use_scan=False):
+    """Construct a keyboard INPUT structure for a single key press/release."""
     scan = MapVirtualKey(vk, MAPVK_VK_TO_VSC)
     flags = (KEYEVENTF_SCANCODE if use_scan else 0) | (0 if is_down else KEYEVENTF_KEYUP)
     if vk in EXTENDED_VK: flags |= KEYEVENTF_EXTENDEDKEY
@@ -71,10 +72,12 @@ def _key_event(vk, is_down=True, use_scan=False):
 
 
 def _mouse_input(dx=0, dy=0, data=0, flags=0):
+    """Construct a mouse INPUT structure."""
     return INPUT(type=INPUT_MOUSE, mi=MOUSEINPUT(dx, dy, data, flags, 0, 0))
 
 
 def _send_inputs(ins, delay=0.02):
+    """Send a batch of INPUT structures with optional delay."""
     if not ins:
         return
     arr = (INPUT * len(ins))(*ins)
@@ -84,6 +87,7 @@ def _send_inputs(ins, delay=0.02):
 
 
 def _parse_combo(combo):
+    """Parse human readable combo like CTRL+ALT+DEL into key codes."""
     parts = [p.strip().upper() for p in combo.split('+') if p.strip()]
     mods = []
     main = None
@@ -106,6 +110,7 @@ def _parse_combo(combo):
 
 
 def press_combo(combo, prefer_scan=False):
+    """Press a keyboard shortcut combination on Windows."""
     mod_vks, main_vk = _parse_combo(combo)
     evts = []
     for vk in mod_vks: evts.append(_key_event(vk, True, prefer_scan))
@@ -117,10 +122,12 @@ def press_combo(combo, prefer_scan=False):
 
 
 def _norm_coord(v):
+    """Clamp normalized coordinate to 0..65535 range for absolute mouse move."""
     return max(0, min(65535, int(round(v * 65535.0))))
 
 
 def mouse_move_normalized(x, y):
+    """Move mouse using normalized coordinates spanning the virtual desktop."""
     xi = _norm_coord(x)
     yi = _norm_coord(y)
     flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
@@ -128,6 +135,7 @@ def mouse_move_normalized(x, y):
 
 
 def mouse_press(button="left"):
+    """Press specified mouse button (left/right)."""
     btn = button.lower()
     if btn == "left":
         flags = MOUSEEVENTF_LEFTDOWN
@@ -139,6 +147,7 @@ def mouse_press(button="left"):
 
 
 def mouse_release(button="left"):
+    """Release specified mouse button (left/right)."""
     btn = button.lower()
     if btn == "left":
         flags = MOUSEEVENTF_LEFTUP

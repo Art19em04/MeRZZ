@@ -6,6 +6,7 @@ from .one_euro import OneEuro
 
 
 def _letterbox(img, newh, neww):
+    """Resize with padding while preserving aspect ratio."""
     ih, iw = img.shape[:2]
     s = min(neww / iw, newh / ih)
     nw, nh = int(round(iw * s)), int(round(ih * s))
@@ -19,6 +20,7 @@ def _letterbox(img, newh, neww):
 
 
 def _unletterbox_xyxy(xyxy, meta):
+    """Map bounding box from letterboxed space back to original image."""
     # map [x1,y1,x2,y2] in letterboxed space back to original image
     iw, ih = meta["in_w"], meta["in_h"]
     s = meta["scale"]
@@ -32,6 +34,7 @@ def _unletterbox_xyxy(xyxy, meta):
 
 
 def _nms(boxes, scores, iou_th=0.45, topk=100):
+    """Perform non-maximum suppression and return kept indices."""
     if len(boxes) == 0: return []
     boxes = np.array(boxes, dtype=np.float32)
     scores = np.array(scores, dtype=np.float32)
@@ -57,6 +60,7 @@ def _nms(boxes, scores, iou_th=0.45, topk=100):
 
 
 class DetectorONNX:
+    """ONNX runtime wrapper for detection models producing bounding boxes."""
     def __init__(self, path, input_size):
         self.path = path
         try:
@@ -70,6 +74,7 @@ class DetectorONNX:
         print("[DET] Providers:", self.sess.get_providers())
 
     def infer(self, rgb):
+        """Run detector on RGB frame and return boxes mapped to original space."""
         lb, meta = _letterbox(rgb, self.in_h, self.in_w)
         x = lb.astype(np.float32) / 255.0
         x = np.transpose(x, (2, 0, 1))[None, ...]
@@ -102,6 +107,7 @@ class DetectorONNX:
 
 
 class LandmarkONNX:
+    """ONNX runtime wrapper for landmark regression with optional smoothing."""
     def __init__(self, path, input_size, smooth=True, one_euro_cfg=None):
         try:
             ort.preload_dlls()
@@ -116,12 +122,14 @@ class LandmarkONNX:
         print("[LMK] Providers:", self.sess.get_providers())
 
     def _pre(self, crop):
+        """Prepare cropped RGB patch for landmark model input."""
         x = cv2.resize(crop, (self.in_w, self.in_h), interpolation=cv2.INTER_LINEAR).astype(np.float32) / 255.0
         x = np.transpose(x, (2, 0, 1))[None, ...]
         return x
 
     @staticmethod
     def _argmax2d(hm):
+        """Locate maximum in heatmap and return normalized coords/value."""
         H, W = hm.shape
         idx = int(np.argmax(hm))
         y, x = divmod(idx, W)
@@ -129,6 +137,7 @@ class LandmarkONNX:
         return x / (W - 1 if W > 1 else 1), y / (H - 1 if H > 1 else 1), v
 
     def _parse(self, y):
+        """Convert raw landmark outputs to list of points and confidence."""
         y = y[0]
         pts = None;
         conf = 1.0
@@ -154,6 +163,7 @@ class LandmarkONNX:
         return pts, conf
 
     def infer(self, rgb_crop, bbox_xyxy):
+        """Infer landmarks on a cropped patch and map back to image coordinates."""
         x = self._pre(rgb_crop)
         out = self.sess.run(self.out_names, {self.inp.name: x})
         pts01, conf = self._parse(out)
@@ -174,6 +184,7 @@ class LandmarkONNX:
 
 
 class TwoStageHandTracker:
+    """Hand tracker combining detector and landmark ONNX models."""
     def __init__(self, det_path, det_input_size, lmk_path, lmk_input_size, max_hands=2, score_th=0.3, nms_th=0.45,
                  presence_th=0.35, smooth=True, one_euro=None):
         self.det = DetectorONNX(det_path, det_input_size)
@@ -184,6 +195,7 @@ class TwoStageHandTracker:
         self.presence_th = presence_th
 
     def process(self, rgb):
+        """Run two-stage detection + landmark pipeline and output hands."""
         (detections, meta) = self.det.infer(rgb)
         H, W = rgb.shape[:2]
         hands_out = []
