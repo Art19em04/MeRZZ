@@ -2,7 +2,6 @@
 import json
 import os
 import time
-from mmap import error
 
 import cv2
 from PySide6 import QtWidgets
@@ -27,10 +26,10 @@ def build_hands(cfg):
     hands_cfg = cfg.get("hands")
     dominant = hands_cfg.get("dominant")
     if dominant != "RIGHT" and dominant != "LEFT":
-        raise ValueError("[CFG ERR] INCORRECT DOMINANT HAND")
+        raise ValueError("[CFG] INCORRECT DOMINANT HAND")
     support = hands_cfg.get("support")
     if dominant != "RIGHT" and dominant != "LEFT":
-        raise ValueError("[CFG ERR] INCORRECT SUPPORT HAND")
+        raise ValueError("[CFG] INCORRECT SUPPORT HAND")
     return {"dominant": dominant, "support": support}
 
 
@@ -106,6 +105,7 @@ def lookup_mapping(table, side, key):
 
 class DebouncedTrigger:
     """Utility that fires after a dwell time while respecting a refractory window."""
+
     def __init__(self, dwell_ms=260, refractory_ms=900):
         self.dwell_ms = dwell_ms
         self.refractory_ms = refractory_ms
@@ -129,6 +129,7 @@ class DebouncedTrigger:
 
 def open_camera(idx, w, h):
     """Try to open camera by preferred index with fallbacks across APIs."""
+
     def try_open(i, api):
         """Attempt to open a specific camera index using selected backend."""
         cap = cv2.VideoCapture(i, api)
@@ -139,7 +140,7 @@ def open_camera(idx, w, h):
             if ok:
                 return cap
             cap.release()
-        raise ValueError("[DEVICE] WRONG DEVICE SETTINGS")
+        raise ValueError("[DEVICE] WRONG DEVICE SETUP")
 
     def probe():
         for probe in range(0, 6):
@@ -156,7 +157,7 @@ def open_camera(idx, w, h):
             return cap
 
     if idx == -1:
-        probe()
+        return probe()
 
     return None
 
@@ -170,6 +171,7 @@ def draw_landmarks(frame, lm):
 
 def main():
     cfg = load_config()
+    app = QtWidgets.QApplication([])
     osd = OSD()
     osd.show()
 
@@ -181,26 +183,24 @@ def main():
     show_fps = bool(vcfg.get("show_fps", False))
 
     cap = open_camera(idx, w, h)
-    if cap is None:
-        raise RuntimeError("Не удалось открыть камеру")
 
     dcfg = cfg.get("detector", {})
     tracker = MediaPipeHandTracker(
-        min_det=dcfg.get("min_detection_confidence", 0.6),
-        min_trk=dcfg.get("min_tracking_confidence", 0.5),
-        max_hands=dcfg.get("max_num_hands", 2),
-        model_complexity=dcfg.get("model_complexity", 1),
+        min_det=dcfg.get("min_detection_confidence"),
+        min_trk=dcfg.get("min_tracking_confidence"),
+        max_hands=dcfg.get("max_num_hands"),
+        model_complexity=dcfg.get("model_complexity"),
     )
 
     gR = GestureState(cfg["gesture_engine"])
     gL = GestureState(cfg["gesture_engine"])
 
     seq_cfg = cfg.get("sequence", {})
-    arm_delay_ms = int(seq_cfg.get("arm_delay_ms", 420))
-    refractory_ms = int(seq_cfg.get("refractory_ms", 1100))
-    cancel_exit_ms = int(seq_cfg.get("cancel_on_hand_exit_ms", 900))
-    auto_exit = bool(seq_cfg.get("auto_exit_on_hand_exit", True))
-    max_len = int(seq_cfg.get("max_len", 6))
+    arm_delay_ms = int(seq_cfg.get("arm_delay_ms"))
+    refractory_ms = int(seq_cfg.get("refractory_ms"))
+    cancel_exit_ms = int(seq_cfg.get("cancel_on_hand_exit_ms"))
+    auto_exit = bool(seq_cfg.get("auto_exit_on_hand_exit"))
+    max_len = int(seq_cfg.get("max_len"))
 
     hands = build_hands(cfg)
     dominant_side = hands["dominant"]
@@ -210,86 +210,55 @@ def main():
     controls_cfg = cfg.get("controls", {})
     seq_ctrl = controls_cfg.get("sequence", {})
     seq_input_side = resolve_side(seq_ctrl.get("input_hand", "dominant"), hands)
-    candidate_ignore = {str(g).upper() for g in seq_ctrl.get("candidate_ignore", ["OPEN_PALM", "FIST"])}
+    candidate_ignore = {str(g).upper() for g in seq_ctrl.get("candidate_ignore")}
 
     def _binding_from_string(raw_binding):
         """Parse user-facing binding string into hand side and gesture tuple."""
         if not isinstance(raw_binding, str):
-            return None
+            raise ValueError("[GESTURE] SMTH INCORRECT")
         parsed = parse_mapping_key(raw_binding, hands)
         if not parsed:
             return None
         side, gestures = parsed
         if not gestures:
-            return None
+            raise ValueError("[GESTURE] GESTURE MAPPING GOES WRONG")
         return side, gestures
 
-    def _parse_single_binding(raw_value, default_binding, default_hand, default_gesture):
+    def _parse_single_binding(raw_value: str):
         """Normalize single-gesture binding configuration to a dict."""
-        def _fallback():
-            """Return default single-gesture binding when parsing fails."""
-            return {
-                "hand": resolve_side(default_hand, hands),
-                "gesture": str(default_gesture).upper(),
-            }
+        candidate = raw_value
+        parsed = _binding_from_string(candidate)
+        if not parsed:
+            raise ValueError("[GESTURE] failed to parse binding")
+        side, gestures = parsed
+        if not gestures:
+            raise ValueError("[GESTURE] no gestures parsed from binding")
+        return {
+            "hand": side,
+            "gesture": gestures[-1],
+        }
 
-        candidate = raw_value if raw_value is not None else default_binding
-        if isinstance(candidate, str):
-            parsed = _binding_from_string(candidate)
-            if parsed:
-                side, gestures = parsed
-                return {"hand": side, "gesture": gestures[-1]}
-        if isinstance(candidate, dict):
-            hand_token = candidate.get("hand", default_hand)
-            gesture_token = candidate.get("gesture", default_gesture)
-            return {
-                "hand": resolve_side(hand_token, hands),
-                "gesture": str(gesture_token).upper(),
-            }
-        if candidate is not default_binding:
-            return _parse_single_binding(None, default_binding, default_hand, default_gesture)
-        return _fallback()
-
-    def _parse_sequence_binding(raw_value, default_binding, default_hand, default_gestures):
+    def _parse_sequence_binding(raw_value: str):
         """Normalize sequence binding configuration to a dict with gestures list."""
-        def _fallback():
-            """Return default sequence binding when parsing fails."""
-            return {
-                "hand": resolve_side(default_hand, hands),
-                "gestures": [str(g).upper() for g in default_gestures],
-            }
+        candidate = raw_value
+        parsed = _binding_from_string(candidate)
+        if not parsed:
+            raise ValueError(f"[GESTURE] failed to parse sequence binding: {candidate!r}")
+        side, gestures = parsed
+        if not gestures:
+            raise ValueError(f"[GESTURE] no gestures parsed from sequence binding: {candidate!r}")
+        return {
+            "hand": side,
+            "gestures": gestures,
+        }
 
-        candidate = raw_value if raw_value is not None else default_binding
-        if isinstance(candidate, str):
-            parsed = _binding_from_string(candidate)
-            if parsed:
-                side, gestures = parsed
-                if gestures:
-                    return {"hand": side, "gestures": gestures}
-        if isinstance(candidate, dict):
-            hand_token = candidate.get("hand", default_hand)
-            start_g = candidate.get("start_gesture", default_gestures[0])
-            end_g = candidate.get("end_gesture", default_gestures[-1])
-            return {
-                "hand": resolve_side(hand_token, hands),
-                "gestures": [str(start_g).upper(), str(end_g).upper()],
-            }
-        if candidate is not default_binding:
-            return _parse_sequence_binding(None, default_binding, default_hand, default_gestures)
-        return _fallback()
-
-    confirm_cfg = seq_ctrl.get("confirm", {})
+    confirm_cfg = seq_ctrl.get("confirm")
     confirm_binding_value = (
         confirm_cfg.get("binding")
         if isinstance(confirm_cfg, dict)
         else confirm_cfg
     )
-    confirm_binding = _parse_single_binding(
-        confirm_binding_value,
-        "NON_DOMINANT-FUNCTIONAL-PINCH_TAP",
-        "non_dominant",
-        "PINCH_TAP",
-    )
+    confirm_binding = _parse_single_binding(confirm_binding_value)
     confirm_hand = confirm_binding["hand"]
     confirm_gesture = confirm_binding["gesture"]
     confirm_deb = DebouncedTrigger(
@@ -297,56 +266,74 @@ def main():
         int(confirm_cfg.get("refractory_ms", 700)),
     )
 
-    undo_cfg = seq_ctrl.get("undo", {})
+    undo_cfg = seq_ctrl.get("undo")
     undo_binding_value = (
         undo_cfg.get("binding")
         if isinstance(undo_cfg, dict)
         else undo_cfg
     )
-    undo_binding = _parse_sequence_binding(
-        undo_binding_value,
-        "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > NON_DOMINANT-FUNCTIONAL-FIST",
-        "non_dominant",
-        ("OPEN_PALM", "FIST"),
-    )
+    undo_binding = _parse_sequence_binding(undo_binding_value)
     undo_hand = undo_binding["hand"]
     undo_steps = undo_binding["gestures"]
     undo_start = undo_steps[0]
     undo_end = undo_steps[-1] if len(undo_steps) > 1 else undo_steps[0]
-    undo_window_ms = int(undo_cfg.get("window_ms", 900))
+    undo_window_ms = int(undo_cfg.get("window_ms"))
 
-    commit_cfg = seq_ctrl.get("commit", {})
+    commit_cfg = seq_ctrl.get("commit")
     commit_binding_value = (
         commit_cfg.get("binding")
         if isinstance(commit_cfg, dict)
         else commit_cfg
     )
     commit_binding = _parse_single_binding(
-        commit_binding_value,
-        "BOTH-FUNCTIONAL-FIST",
-        "both",
-        "FIST",
+        commit_binding_value
     )
     commit_hand = commit_binding["hand"]
     commit_gesture = commit_binding["gesture"]
     commit_deb = DebouncedTrigger(
-        int(commit_cfg.get("dwell_ms", 260)),
-        int(commit_cfg.get("refractory_ms", 1200)),
+        int(commit_cfg.get("dwell_ms")),
+        int(commit_cfg.get("refractory_ms")),
     )
     exit_on_commit = bool(commit_cfg.get("exit_on_commit", seq_cfg.get("exit_on_commit", True)))
 
-    cmd_map = cfg.get("command_mappings", {})
-    single_map_raw = cmd_map.get("single_gestures", {})
-    complex_map_raw = cmd_map.get("complex_gestures", {})
+    cmd_map = cfg.get("command_mappings") or {}
+
+    single_map_raw = cmd_map.get("single_gestures") or {}
+    complex_map_raw = cmd_map.get("complex_gestures") or {}
+    functional_raw = cmd_map.get("functional") or {}
+    mode_refractory_ms = int(functional_raw.get("refractory_ms", 800))
+    mode_triggers = {}
+
+    for raw_key, combo in functional_raw.items():
+        if not isinstance(combo, str) or not combo.startswith("MODE_"):
+            continue
+
+        parsed = parse_mapping_key(raw_key, hands)
+        if not parsed:
+            raise ValueError(f"[GESTURE] bad functional mapping key: {raw_key!r}")
+        side, gestures = parsed
+        if not gestures:
+            raise ValueError(f"[GESTURE] empty gestures for key: {raw_key!r}")
+
+        binding = {"hand": side, "gesture": gestures[0]}
+
+        if combo == "MODE_ONE_HAND":
+            mode_triggers["one_hand"] = binding
+        elif combo == "MODE_RECORD":
+            mode_triggers["record"] = binding
+        elif combo == "MODE_MOUSE":
+            mode_triggers["mouse"] = binding
+        elif combo == "MODE_EXIT":
+            mode_triggers["exit"] = binding
 
     single_map = {}
     for raw_key, combo in single_map_raw.items():
         parsed = parse_mapping_key(raw_key, hands)
         if not parsed:
-            continue
+            raise ValueError("[GESTURE] invalid single mapping")
         side, gestures = parsed
         if not gestures:
-            continue
+            raise ValueError("[GESTURE] empty single mapping")
         bucket = single_map.setdefault(side, {})
         bucket[gestures[0]] = combo
 
@@ -354,34 +341,18 @@ def main():
     for raw_key, combo in complex_map_raw.items():
         parsed = parse_mapping_key(raw_key, hands)
         if not parsed:
-            continue
+            raise ValueError("[GESTURE] invalid complex mapping")
         side, gestures = parsed
         if not gestures:
-            continue
+            raise ValueError("[GESTURE] empty complex mapping")
         bucket = seq_map.setdefault(side, {})
         bucket[tuple(gestures)] = combo
-    # allow single gesture sequences as well
+
     for side, bucket in single_map.items():
         seq_bucket = seq_map.setdefault(side, {})
         for gesture, combo in bucket.items():
             seq_bucket.setdefault((gesture,), combo)
 
-    mode_cfg = cfg.get("mode_switches", {})
-    mode_refractory_ms = int(mode_cfg.get("refractory_ms", 800))
-
-    def _parse_trigger(name, default_binding, default_hand, default_gesture):
-        """Build a trigger binding from mode config with sensible defaults."""
-        entry = mode_cfg.get(name)
-        binding = _parse_single_binding(entry, default_binding, default_hand, default_gesture)
-        binding["gesture"] = binding["gesture"].upper()
-        return binding
-
-    mode_triggers = {
-        "one_hand": _parse_trigger("one_hand", "NON_DOMINANT-FUNCTIONAL-FIST", "non_dominant", "FIST"),
-        "record": _parse_trigger("record", "BOTH-FUNCTIONAL-OPEN_PALM", "both", "OPEN_PALM"),
-        "mouse": _parse_trigger("mouse", "NON_DOMINANT-FUNCTIONAL-THUMBS_UP", "non_dominant", "THUMBS_UP"),
-        "exit": _parse_trigger("exit", "NON_DOMINANT-FUNCTIONAL-SWIPE_LEFT", "non_dominant", "SWIPE_LEFT"),
-    }
 
     def _trigger_label(trig):
         """Format human readable label for trigger binding."""
@@ -415,25 +386,40 @@ def main():
             return "NON_DOMINANT"
         return side
 
-    def _binding_notation(binding, context="SINGLE"):
+    def _binding_notation(binding):
         """Compose notation string like DOMINANT-SINGLE-GESTURE for display."""
         if not binding:
-            return ""
-        gesture = binding.get("gesture") or ""
+            raise ValueError("[BINDING] SMTH")
+        gesture = binding.get("gesture")
         hand = binding.get("hand")
-        token = _hand_token_label(hand or dominant_side)
+        token = _hand_token_label(hand)
         if not gesture:
             return token
-        return f"{token}-{context}-{gesture}"
+        return f"{token}-{gesture}"
 
     one_cfg = cfg.get("one_hand_mode", {})
     one_enabled = bool(one_cfg.get("enabled", True))
-    one_status_label = one_cfg.get("status_label") or "ONE-HAND"
-    one_active_hint = one_cfg.get("active_hint")
+    one_status_label = one_cfg.get("status_label")
+
+    func = cfg.get("command_mappings", {}).get("functional", {})
+    exit_gesture = next((g for g, cmd in func.items() if cmd == "MODE_EXIT"), None)
+
+    base_hint = one_cfg.get("active_hint") or ""
+
+    if exit_gesture:
+        exit_hint = f"To exit mode: {exit_gesture}"
+    else:
+        exit_hint = ""
+
+    if base_hint and exit_hint:
+        one_active_hint = f"{base_hint} | {exit_hint}"
+    else:
+        one_active_hint = base_hint or exit_hint or ""
+
     dispatch_side = resolve_side(one_cfg.get("dispatch_hand", "dominant"), hands)
+
     if not one_active_hint:
-        trig_label = _trigger_label(mode_triggers["one_hand"])
-        one_active_hint = f"{trig_label} → SINGLE" if trig_label else "ONE-HAND"
+        raise ValueError("[GESTURE] SMTH")
 
     def _binding_active(binding, right_present, left_present, event_right, event_left):
         """Check whether gesture binding is satisfied given hand presence and events."""
@@ -479,68 +465,33 @@ def main():
         return False
 
     mouse_cfg = cfg.get("mouse_control", {})
-    mouse_enabled = bool(mouse_cfg.get("enabled", True))
-    mouse_status_label = mouse_cfg.get("status_label") or "MOUSE"
+    mouse_enabled = bool(mouse_cfg.get("enabled"))
+    mouse_status_label = mouse_cfg.get("status_label")
     mouse_smooth = max(0.0, min(1.0, float(mouse_cfg.get("smoothing_alpha", 0.25))))
-    pointer_hand_token = mouse_cfg.get("pointer_hand", "dominant")
+    pointer_hand_token = mouse_cfg.get("pointer_hand")
     pointer_side = resolve_side(pointer_hand_token, hands)
     if pointer_side not in ("RIGHT", "LEFT"):
         pointer_side = dominant_side
     pointer_landmark = int(mouse_cfg.get("pointer_landmark", 8))
-    if pointer_landmark < 0 or pointer_landmark > 20:
-        pointer_landmark = 8
 
-    def _read_mouse_binding(key, legacy_key, default_binding, default_hand, default_gesture):
-        """Resolve mouse control binding supporting legacy config keys."""
+    def _read_mouse_binding(key):
         raw_value = mouse_cfg.get(key)
-        display_source = raw_value
-        if raw_value is None and legacy_key:
-            legacy = mouse_cfg.get(legacy_key)
-            if isinstance(legacy, str) and legacy.strip():
-                normalized = legacy.strip().upper()
-                inferred_hand = _hand_token_label(pointer_side)
-                raw_value = f"{inferred_hand}-SINGLE-{normalized}"
-                display_source = raw_value
-        binding = _parse_single_binding(
-            raw_value,
-            default_binding,
-            default_hand,
-            default_gesture,
-        )
+        binding = _parse_single_binding(raw_value)
         gesture = binding.get("gesture") or ""
         binding["gesture"] = gesture.upper()
-        label = None
-        if isinstance(display_source, str) and display_source.strip():
-            label = display_source.strip().upper()
-        elif isinstance(display_source, dict):
-            hand_token = resolve_side(display_source.get("hand"), hands)
-            gesture_token = display_source.get("gesture", default_gesture)
-            label = _binding_notation(
-                {"hand": hand_token, "gesture": str(gesture_token).upper()},
-                "SINGLE",
-            )
-        if not label:
-            label = _binding_notation(binding, "SINGLE")
+        label = _binding_notation(binding)
         return binding, label
 
     mouse_left_binding, mouse_left_label = _read_mouse_binding(
-        "left_click_binding",
-        "left_click_pose",
-        "DOMINANT-SINGLE-FIST",
-        "dominant",
-        "FIST",
+        "left_click_binding"
     )
     mouse_right_binding, mouse_right_label = _read_mouse_binding(
-        "right_click_binding",
-        "right_click_pose",
-        "DOMINANT-SINGLE-OPEN_PALM",
-        "dominant",
-        "OPEN_PALM",
+        "right_click_binding"
     )
     mouse_active_hint = mouse_cfg.get("active_hint")
     if not mouse_active_hint:
         trig_label = _trigger_label(mode_triggers["mouse"])
-        pointer_hint = _binding_notation({"hand": pointer_side, "gesture": "POINT"}, "SINGLE")
+        pointer_hint = _binding_notation({"hand": pointer_side, "gesture": "POINT"})
         base_hint = f"CURSOR: {pointer_hint} | LMB: {mouse_left_label} | RMB: {mouse_right_label}"
         mouse_active_hint = f"{trig_label} | {base_hint}" if trig_label else base_hint
 
