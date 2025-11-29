@@ -15,7 +15,6 @@ class MediaPipeHandTracker:
 
     def process(self, rgb):
         """Run MediaPipe on an RGB frame and return normalized landmarks."""
-        # Mediapipe ожидает RGB без копии, но важно не использовать cv2.cvtColor тут
         results = self.hands.process(rgb)
         out = []
         if not results.multi_hand_landmarks: return out
@@ -24,7 +23,6 @@ class MediaPipeHandTracker:
             pts = [(float(p.x), float(p.y)) for p in lm.landmark]
             score = float(handed.classification[0].score) if handed and handed.classification else 0.0
             label = handed.classification[0].label if handed and handed.classification else "Unknown"
-            # safety clamp
             pts = [(max(0.0, min(1.0, x)), max(0.0, min(1.0, y))) for (x, y) in pts]
             out.append({"lm": pts, "label": label, "score": score})
         return out

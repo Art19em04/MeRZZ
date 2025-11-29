@@ -1,6 +1,4 @@
 """Trigger helpers."""
-from __future__ import annotations
-
 
 class DebouncedTrigger:
     """Utility that fires after a dwell time while respecting a refractory window."""
