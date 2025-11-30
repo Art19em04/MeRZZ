@@ -1,17 +1,17 @@
 {
+  "__comment_backend": "-------CORE BACKEND SETTINGS-------",
   "backend": "mediapipe",
   "onnx_landmarks": true,
+
+  "__comment_detector": "-------DETECTOR SETTINGS---------",
   "detector": {
-    "backend": "mediapipe",
     "min_detection_confidence": 0.6,
     "min_tracking_confidence": 0.5,
     "max_num_hands": 2,
     "model_complexity": 1
   },
-  "hands": {
-    "dominant": "right",
-    "support": "left"
-  },
+
+  "__comment_video": "--------CAMERA SETTINGS---------",
   "video": {
     "camera_index": 0,
     "width": 1280,
@@ -19,11 +19,14 @@
     "mirror": true,
     "show_fps": true
   },
-  "sounds": {
-    "on_toggle": false,
-    "on_commit": false,
-    "on_send": false
+
+  "__comment_hands": "--------HAND ROLES / SIDES---------",
+  "hands": {
+    "dominant": "RIGHT",
+    "support": "LEFT"
   },
+
+  "__comment_gesture_engine": "--------LOW-LEVEL GESTURE ENGINE---------",
   "gesture_engine": {
     "clutch": "none",
     "cooldown_ms": 420,
@@ -35,6 +38,8 @@
     "point_others_min_flex": 0.5,
     "swipe_speed_px": 900
   },
+
+  "__comment_sequence": "--------SEQUENCE RECORDING ENGINE---------",
   "sequence": {
     "arm_delay_ms": 420,
     "refractory_ms": 1100,
@@ -44,73 +49,79 @@
     "max_len": 6,
     "exit_on_commit": true
   },
+
+  "__comment_sounds": "--------SOUNDS / FEEDBACK---------",
+  "sounds": {
+    "on_toggle": false,
+    "on_commit": false,
+    "on_send": false
+  },
+
+  "__comment_one_hand_mode": "--------ONE-HAND MODE CONFIG---------",
   "one_hand_mode": {
     "enabled": true,
     "status_label": "ONE-HAND",
-    "active_hint": "NON_DOMINANT-FUNCTIONAL-FIST → DOMINANT-SINGLE",
+    "active_hint": "",
     "dispatch_hand": "dominant"
   },
+
+  "__comment_mouse_control": "--------MOUSE CONTROL MODE---------",
   "mouse_control": {
     "enabled": true,
     "status_label": "MOUSE",
-    "active_hint": "NON_DOMINANT-FUNCTIONAL-THUMBS_UP | CURSOR: DOMINANT-SINGLE-POINT | LMB: DOMINANT-SINGLE-FIST | RMB: DOMINANT-SINGLE-OPEN_PALM",
+    "active_hint": "NON_DOMINANT-THUMBS_UP | CURSOR: DOMINANT-SINGLE-POINT | LMB: DOMINANT-SINGLE-FIST | RMB: DOMINANT-SINGLE-OPEN_PALM",
     "smoothing_alpha": 0.25,
     "pointer_hand": "dominant",
     "pointer_landmark": 8,
     "left_click_binding": "NON_DOMINANT-SINGLE-PINCH_TAP",
     "right_click_binding": "NON_DOMINANT-SINGLE-THUMBS_UP"
   },
-  "mode_switches": {
-    "refractory_ms": 800,
-    "one_hand": "NON_DOMINANT-FUNCTIONAL-FIST",
-    "record": "BOTH-FUNCTIONAL-OPEN_PALM",
-    "mouse": "NON_DOMINANT-FUNCTIONAL-THUMBS_UP",
-    "exit": "NON_DOMINANT-FUNCTIONAL-SWIPE_LEFT"
-  },
+
+  "__comment_controls": "--------HIGH-LEVEL CONTROL GESTURES (SEQUENCE / CONFIRM / UNDO / COMMIT)---------",
   "controls": {
     "sequence": {
       "input_hand": "dominant",
-      "candidate_ignore": [
-        "OPEN_PALM",
-        "FIST"
-      ],
+      "candidate_ignore": [],
       "confirm": {
-        "binding": "NON_DOMINANT-FUNCTIONAL-PINCH_TAP",
+        "binding": "NON_DOMINANT-PINCH_TAP",
         "dwell_ms": 220,
         "refractory_ms": 700
       },
       "undo": {
-        "binding": "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > NON_DOMINANT-FUNCTIONAL-FIST",
+        "binding": "NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST",
         "window_ms": 900
       },
       "commit": {
-        "binding": "BOTH-FUNCTIONAL-FIST",
+        "binding": "BOTH-FIST",
         "dwell_ms": 260,
         "refractory_ms": 1200,
         "exit_on_commit": true
       }
     }
   },
+
+  "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
   "command_mappings": {
     "functional": {
-      "NON_DOMINANT-FUNCTIONAL-FIST": "MODE_ONE_HAND",
-      "BOTH-FUNCTIONAL-OPEN_PALM": "MODE_RECORD",
-      "NON_DOMINANT-FUNCTIONAL-THUMBS_UP": "MODE_MOUSE",
-      "NON_DOMINANT-FUNCTIONAL-SWIPE_LEFT": "MODE_EXIT",
-      "NON_DOMINANT-FUNCTIONAL-PINCH_TAP": "CONFIRM_STEP",
-      "NON_DOMINANT-FUNCTIONAL-OPEN_PALM > NON_DOMINANT-FUNCTIONAL-FIST": "UNDO_STEP",
-      "BOTH-FUNCTIONAL-FIST": "COMMIT_SEQUENCE"
+      "refractory_ms": 800,
+      "NON_DOMINANT-FIST": "MODE_ONE_HAND",
+      "BOTH-OPEN_PALM": "MODE_RECORD",
+      "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
+      "NON_DOMINANT-PINCH_HOLD": "MODE_EXIT"
     },
     "complex_gestures": {
       "DOMINANT-SEQUENCE-POINT > DOMINANT-SEQUENCE-FIST": "CTRL+ALT+T",
-      "DOMINANT-SEQUENCE-OPEN_PALM > DOMINANT-SEQUENCE-FIST": "ALT+F4",
-      "DOMINANT-SEQUENCE-SWIPE_LEFT > DOMINANT-SEQUENCE-SWIPE_RIGHT": "ALT+TAB"
+      "DOMINANT-SEQUENCE-OPEN_PALM > DOMINANT-SEQUENCE-FIST": "ALT+F4"
     },
     "single_gestures": {
-      "DOMINANT-SINGLE-PINCH_TAP": "CTRL+C",
-      "DOMINANT-SINGLE-PINCH_HOLD": "CTRL+V"
+      "NON_DOMINANT-SINGLE-PINCH_TAP": "CTRL+C",
+      "NON_DOMINANT-SINGLE-PINCH_HOLD": "CTRL+V",
+      "DOMINANT-SEQUENCE-OPEN_PALM": "ALT+SHIFT+ESC",
+      "DOMINANT-SEQUENCE-FIST": "ALT+ESC"
     }
   },
+
+  "__comment_help_gesture_notation": "--------REFERENCE: GESTURE NOTATION---------",
   "_gesture_notation": [
     "Блок строится как [СТОРОНА]-[КОНТЕКСТ]-[ЖЕСТ], где сторона может быть LEFT/RIGHT/BOTH или DOMINANT/NON_DOMINANT",
     "Каждый фрагмент последовательности должен содержать все три части и, при необходимости, повторять сторону для ясности",
@@ -118,6 +129,8 @@
     "Последовательность жестов разделяется символом '>' и читается слева направо",
     "Пример: DOMINANT-SEQUENCE-SWIPE_LEFT > DOMINANT-SEQUENCE-SWIPE_RIGHT — сначала ведущая рука выполняет SWIPE_LEFT в режиме последовательности, затем та же рука выполняет SWIPE_RIGHT как следующий шаг"
   ],
+
+  "__comment_help_pc_actions": "--------REFERENCE: PC ACTIONS DESCRIPTION---------",
   "_pc_actions": [
     "MODE_ONE_HAND — переключение в одноручный режим",
     "MODE_MOUSE — управление курсором",

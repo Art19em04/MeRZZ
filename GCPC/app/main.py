@@ -274,41 +274,56 @@ def main():
     both_pose_latched = {}
 
     def switch_mode(new_mode, now_ms, force_reset=False):
-        """Transition between operation modes and reset related state when needed."""
         nonlocal current_mode, seq_active, one_hand_active, mouse_active
         nonlocal mouse_prev, mouse_left_down, mouse_right_down
         nonlocal last_single_action, seq_buffer, seq_pending, last_evt_ms, mode_last_change_ms
+
         prev = current_mode
+
         if new_mode == prev and not force_reset:
-            mode_last_change_ms = now_ms
             return
-        if new_mode == "record":
+
+        # --- sequence ---
+        if prev == "record" or force_reset:
+            seq_active = False
             seq_buffer.clear()
             seq_pending = None
+
+        if new_mode == "record":
             seq_active = True
+            seq_buffer.clear()
+            seq_pending = None
             last_evt_ms = now_ms
         else:
             seq_active = False
-            if prev == "record" or force_reset:
-                seq_buffer.clear()
-                seq_pending = None
-        if new_mode != "mouse" or prev == "mouse" or force_reset:
+
+        # --- mosuse ---
+        if prev == "mouse" or force_reset:
             if mouse_left_down:
                 mouse_release("left")
                 mouse_left_down = False
             if mouse_right_down:
                 mouse_release("right")
                 mouse_right_down = False
-            mouse_prev = None
-        elif new_mode == "mouse":
-            mouse_prev = None
+
+        mouse_prev = None if new_mode == "mouse" else None
+
+        # --- one-hand ---
         if new_mode != "one_hand":
             last_single_action = ""
+
         one_hand_active = (new_mode == "one_hand") and one_enabled
         mouse_active = (new_mode == "mouse") and mouse_enabled
+
         current_mode = new_mode
         mode_last_change_ms = now_ms
-        labels = {"idle": "IDLE", "record": "RECORD", "mouse": mouse_status_label, "one_hand": one_status_label}
+
+        labels = {
+            "idle": "IDLE",
+            "record": "RECORD",
+            "mouse": mouse_status_label,
+            "one_hand": one_status_label,
+        }
         print(f"[MODE] -> {labels.get(new_mode, new_mode.upper())}")
 
     fps = None
