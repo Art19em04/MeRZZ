@@ -70,11 +70,11 @@
     "enabled": true,
     "status_label": "MOUSE",
     "active_hint": "NON_DOMINANT-THUMBS_UP | CURSOR: DOMINANT-SINGLE-POINT | LMB: DOMINANT-SINGLE-FIST | RMB: DOMINANT-SINGLE-OPEN_PALM",
-    "smoothing_alpha": 0.25,
+    "smoothing_alpha": 0.4,
     "pointer_hand": "dominant",
     "pointer_landmark": 8,
-    "left_click_binding": "NON_DOMINANT-SINGLE-PINCH_TAP",
-    "right_click_binding": "NON_DOMINANT-SINGLE-THUMBS_UP"
+    "left_click_binding": "NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST",
+    "right_click_binding": "NON_DOMINANT-PINCH_TAP"
   },
 
   "__comment_controls": "--------HIGH-LEVEL CONTROL GESTURES (SEQUENCE / CONFIRM / UNDO / COMMIT)---------",
@@ -103,11 +103,11 @@
   "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
   "command_mappings": {
     "functional": {
-      "refractory_ms": 800,
+      "refractory_ms": 200,
       "NON_DOMINANT-FIST": "MODE_ONE_HAND",
       "BOTH-OPEN_PALM": "MODE_RECORD",
       "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
-      "NON_DOMINANT-PINCH_HOLD": "MODE_EXIT"
+      "NON_DOMINANT-SEQUENCE-OPEN_PALM > NON_DOMINANT-SEQUENCE-OPEN_PALM > NON_DOMINANT-SEQUENCE-OPEN_PALM": "MODE_EXIT"
     },
     "complex_gestures": {
       "DOMINANT-SEQUENCE-POINT > DOMINANT-SEQUENCE-FIST": "CTRL+ALT+T",
