@@ -69,7 +69,7 @@
   "mouse_control": {
     "enabled": true,
     "status_label": "MOUSE",
-    "active_hint": "NON_DOMINANT-THUMBS_UP | CURSOR: DOMINANT-SINGLE-POINT | LMB: DOMINANT-SINGLE-FIST | RMB: DOMINANT-SINGLE-OPEN_PALM",
+    "active_hint": "NON_DOMINANT-THUMBS_UP | CURSOR: DOMINANT-POINT | LMB: DOMINANT-FIST | RMB: DOMINANT-OPEN_PALM",
     "smoothing_alpha": 0.4,
     "pointer_hand": "dominant",
     "pointer_landmark": 8,
@@ -79,8 +79,8 @@
       "width": 0.5,
       "height": 0.5
     },
-    "left_click_binding": "NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST",
-    "right_click_binding": "NON_DOMINANT-PINCH_TAP"
+    "left_click_binding": "NON_DOMINANT-PINCH_TAP",
+    "right_click_binding": "NON_DOMINANT-OPEN_PALM"
   },
 
   "__comment_controls": "--------HIGH-LEVEL CONTROL GESTURES (SEQUENCE / CONFIRM / UNDO / COMMIT)---------",
@@ -113,18 +113,18 @@
       "NON_DOMINANT-FIST": "MODE_ONE_HAND",
       "BOTH-OPEN_PALM": "MODE_RECORD",
       "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
-      "NON_DOMINANT-SEQUENCE-OPEN_PALM + DOMINANT-SEQUENCE-OPEN_PALM": "MODE_EXIT"
+      "NON_DOMINANT-OPEN_PALM + DOMINANT-OPEN_PALM": "MODE_EXIT"
     },
     "complex_gestures": {
-      "DOMINANT-SEQUENCE-POINT > DOMINANT-SEQUENCE-FIST": "CTRL+ALT+T",
-      "DOMINANT-SEQUENCE-OPEN_PALM > DOMINANT-SEQUENCE-FIST": "ALT+F4"
+      "DOMINANT-SEQUENCE-POINT > DOMINANT-FIST": "CTRL+ALT+T",
+      "DOMINANT-SEQUENCE-OPEN_PALM > DOMINANT-FIST": "ALT+F4"
     },
     "single_gestures": {
-      "NON_DOMINANT-SINGLE-PINCH_TAP": "CTRL+C",
-      "NON_DOMINANT-SINGLE-PINCH_HOLD": "CTRL+V",
-      "NON_DOMINANT-SINGLE-OPEN_PALM > NON_DOMINANT-SINGLE-FIST": "CTRL+Z",
-      "DOMINANT-SEQUENCE-OPEN_PALM": "ALT+SHIFT+ESC",
-      "DOMINANT-SEQUENCE-FIST": "ALT+ESC"
+      "NON_DOMINANT-PINCH_TAP": "CTRL+C",
+      "NON_DOMINANT-PINCH_HOLD": "CTRL+V",
+      "NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST": "CTRL+Z",
+      "DOMINANT-OPEN_PALM": "ALT+SHIFT+ESC",
+      "DOMINANT-FIST": "ALT+ESC"
     }
   }
 }
