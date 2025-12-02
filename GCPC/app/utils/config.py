@@ -14,6 +14,13 @@ def load_config(config_path: Path | str | None = None) -> Dict[str, Any]:
         return json.load(f)
 
 
+def save_config(cfg: Dict[str, Any], config_path: Path | str | None = None) -> None:
+    """Persist configuration back to disk with UTF-8 encoding."""
+    path = Path(config_path) if config_path else ROOT / "config.json"
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
 def build_hands(cfg: Dict[str, Any]) -> Dict[str, str]:
     """Construct a mapping describing dominant and support hands."""
     hands_cfg = cfg.get("hands") or {}

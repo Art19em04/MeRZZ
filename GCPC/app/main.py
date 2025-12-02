@@ -1,9 +1,10 @@
 import time
+from typing import Dict, List
 
 import cv2
 from PySide6 import QtWidgets
 
-from app.gestures import GestureState
+from app.gestures import GestureState, THUMB_TIP, INDEX_TIP, finger_flexion
 from app.os_events_win import mouse_move_normalized, mouse_press, mouse_release, press_combo
 from app.osd import OSD
 from app.tracker_mediapipe import MediaPipeHandTracker
@@ -19,7 +20,7 @@ from app.utils.bindings import (
     trigger_label,
 )
 from app.utils.camera import draw_landmarks, open_camera
-from app.utils.config import build_hands, load_config, resolve_side
+from app.utils.config import build_hands, load_config, resolve_side, save_config
 from app.utils.triggers import DebouncedTrigger
 
 
@@ -29,12 +30,57 @@ def main():
     osd = OSD()
     osd.show()
 
+    def _dist(a, b):
+        dx, dy = a[0] - b[0], a[1] - b[1]
+        return (dx * dx + dy * dy) ** 0.5
+
+    def _percentile(values: List[float], fraction: float) -> float | None:
+        if not values:
+            return None
+        srt = sorted(values)
+        idx = int((len(srt) - 1) * max(0.0, min(1.0, fraction)))
+        return srt[idx]
+
+    def _clamp(val: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, val))
+
+    def _active_pose_name(state: GestureState, fallback: str) -> str:
+        for name in ("PINCH", "FIST", "THUMBS_UP", "POINT", "OPEN_PALM", "SWIPE_LEFT", "SWIPE_RIGHT"):
+            if state.pose_flags.get(name):
+                return name
+        return fallback or "—"
+
+    def _draw_pose_label(frame, lm, text, color=(0, 200, 255)):
+        if not text or not lm:
+            return
+        h, w = frame.shape[:2]
+        xs = [p[0] * w for p in lm]
+        ys = [p[1] * h for p in lm]
+        x = int(min(xs))
+        y = int(min(ys)) - 10
+        y = max(20, y)
+        cv2.putText(
+            frame,
+            text,
+            (x, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+
     vcfg = cfg["video"]
     idx = int(vcfg.get("camera_index", 0))
     w = int(vcfg.get("width", 1280))
     h = int(vcfg.get("height", 720))
     mirror = bool(vcfg.get("mirror", True))
     show_fps = bool(vcfg.get("show_fps", False))
+
+    calib_cfg = cfg.get("calibration", {})
+    calibration_enabled = bool(calib_cfg.get("enabled", True))
+    calibration_duration_ms = int(calib_cfg.get("duration_ms", 12000))
+    calibration_trigger_key = str(calib_cfg.get("trigger_key", "c")).lower()
 
     cap = open_camera(idx, w, h)
 
@@ -140,7 +186,10 @@ def main():
             mode_triggers["mouse"] = binding
         elif combo == "MODE_EXIT":
             mode_triggers["exit"] = binding
+        elif combo == "MODE_CALIBRATE":
+            mode_triggers["calibrate"] = binding
 
+    mode_triggers.setdefault("calibrate", None)
     single_map = build_single_map(single_map_raw, hands)
 
     seq_map = build_sequence_map(complex_map_raw, hands)
@@ -280,6 +329,10 @@ def main():
     last_R_label = ""
     last_L_label = ""
 
+    calibration_active = False
+    calibration_start_ms = 0
+    calibration_data: Dict[str, List[float]] = {}
+
     one_hand_active = False
     mouse_active = False
     last_single_action = ""
@@ -289,10 +342,118 @@ def main():
 
     both_pose_latched = {}
 
+    def _new_calibration_data() -> Dict[str, List[float]]:
+        return {
+            "pinch": [],
+            "fist": [],
+            "thumbs_thumb": [],
+            "thumbs_others": [],
+            "point_index": [],
+            "point_others": [],
+            "swipe_speed": [],
+        }
+
+    def _record_calibration(state: GestureState, lm):
+        nonlocal calibration_data
+        if not calibration_active:
+            return
+        flex = finger_flexion(lm)
+        pinch_d = _dist(lm[THUMB_TIP], lm[INDEX_TIP])
+        avg_other = (flex["middle"] + flex["ring"] + flex["pinky"]) / 3.0
+        if state.pose_flags.get("PINCH"):
+            calibration_data["pinch"].append(pinch_d)
+        if state.pose_flags.get("FIST"):
+            avg_fist = (flex["index"] + flex["middle"] + flex["ring"] + flex["pinky"]) / 4.0
+            calibration_data["fist"].append(avg_fist)
+        if state.pose_flags.get("THUMBS_UP"):
+            calibration_data["thumbs_thumb"].append(flex["thumb"])
+            calibration_data["thumbs_others"].append(avg_other)
+        if state.pose_flags.get("POINT"):
+            calibration_data["point_index"].append(flex["index"])
+            calibration_data["point_others"].append(avg_other)
+        if state.pose_flags.get("SWIPE_LEFT") or state.pose_flags.get("SWIPE_RIGHT"):
+            if len(state.wrist_hist) >= 2:
+                t0, p0 = state.wrist_hist[0]
+                t1, p1 = state.wrist_hist[-1]
+                dt = max(1e-3, (t1 - t0) / 1000.0)
+                vx = abs((p1[0] - p0[0]) / dt)
+                calibration_data["swipe_speed"].append(vx)
+
+    def _finalize_calibration(now_ms: int):
+        nonlocal calibration_active, cfg
+        if not calibration_active:
+            return
+        calibration_active = False
+        ge_cfg = cfg.get("gesture_engine", {})
+
+        def or_default(values: List[float], fraction: float, transform, fallback_key: str):
+            val = _percentile(values, fraction)
+            if val is None:
+                return ge_cfg.get(fallback_key)
+            return transform(val)
+
+        pinch_thr = or_default(
+            calibration_data["pinch"],
+            0.9,
+            lambda v: _clamp(v * 1.1, 0.01, 0.2),
+            "pinch_threshold",
+        )
+        fist_thr = or_default(
+            calibration_data["fist"],
+            0.25,
+            lambda v: _clamp(v * 0.9, 0.15, 0.95),
+            "fist_threshold",
+        )
+        thumbs_thumb = or_default(
+            calibration_data["thumbs_thumb"],
+            0.8,
+            lambda v: _clamp(v * 1.1, 0.05, 0.8),
+            "thumbs_up_thumb_max_flex",
+        )
+        thumbs_other = or_default(
+            calibration_data["thumbs_others"],
+            0.2,
+            lambda v: _clamp(v * 0.9, 0.3, 0.95),
+            "thumbs_up_others_min_flex",
+        )
+        point_idx = or_default(
+            calibration_data["point_index"],
+            0.8,
+            lambda v: _clamp(v * 1.1, 0.05, 0.7),
+            "point_index_max_flex",
+        )
+        point_others = or_default(
+            calibration_data["point_others"],
+            0.2,
+            lambda v: _clamp(v * 0.9, 0.3, 0.95),
+            "point_others_min_flex",
+        )
+        swipe_thr = or_default(
+            calibration_data["swipe_speed"],
+            0.5,
+            lambda v: int(_clamp(v * 800 * 0.9, 200, 2000)),
+            "swipe_speed_px",
+        )
+
+        updates = {
+            "pinch_threshold": pinch_thr,
+            "fist_threshold": fist_thr,
+            "thumbs_up_thumb_max_flex": thumbs_thumb,
+            "thumbs_up_others_min_flex": thumbs_other,
+            "point_index_max_flex": point_idx,
+            "point_others_min_flex": point_others,
+            "swipe_speed_px": swipe_thr,
+        }
+        ge_cfg.update(updates)
+        cfg["gesture_engine"] = ge_cfg
+        save_config(cfg)
+        print(f"[CALIBRATION] Updated gesture thresholds at {now_ms} ms: {updates}")
+
     def switch_mode(new_mode, now_ms, force_reset=False):
         nonlocal current_mode, seq_active, one_hand_active, mouse_active
         nonlocal mouse_prev, mouse_left_down, mouse_right_down
         nonlocal last_single_action, seq_buffer, seq_pending, last_evt_ms, mode_last_change_ms
+        nonlocal calibration_active, calibration_start_ms, calibration_data
 
         prev = current_mode
 
@@ -313,7 +474,7 @@ def main():
         else:
             seq_active = False
 
-        # --- mosuse ---
+        # --- mouse ---
         if prev == "mouse" or force_reset:
             if mouse_left_down:
                 mouse_release("left")
@@ -322,14 +483,27 @@ def main():
                 mouse_release("right")
                 mouse_right_down = False
 
-        mouse_prev = None if new_mode == "mouse" else None
+        if new_mode == "mouse" and mouse_enabled:
+            mouse_prev = None
+            mouse_active = True
+        else:
+            mouse_prev = None
+            mouse_active = False
+
+        # --- calibration ---
+        if prev == "calibrate" or force_reset:
+            calibration_active = False
+
+        if new_mode == "calibrate" and calibration_enabled:
+            calibration_active = True
+            calibration_start_ms = now_ms
+            calibration_data = _new_calibration_data()
 
         # --- one-hand ---
         if new_mode != "one_hand":
             last_single_action = ""
 
         one_hand_active = (new_mode == "one_hand") and one_enabled
-        mouse_active = (new_mode == "mouse") and mouse_enabled
 
         current_mode = new_mode
         mode_last_change_ms = now_ms
@@ -339,6 +513,7 @@ def main():
             "record": "RECORD",
             "mouse": mouse_status_label,
             "one_hand": one_status_label,
+            "calibrate": "CALIBRATION",
         }
         print(f"[MODE] -> {labels.get(new_mode, new_mode.upper())}")
 
@@ -396,6 +571,7 @@ def main():
             evR = gR.update_and_classify(right["lm"]) or ""
             if evR:
                 last_R_label = evR
+            _record_calibration(gR, right["lm"])
         else:
             gR.pose_flags.clear()
             if seq_active and seq_input_side == "RIGHT" and cancel_exit_ms > 0 and (
@@ -413,6 +589,7 @@ def main():
             evL = gL.update_and_classify(left["lm"]) or ""
             if evL:
                 last_L_label = evL
+            _record_calibration(gL, left["lm"])
         else:
             gL.pose_flags.clear()
             if seq_active and seq_input_side == "LEFT" and cancel_exit_ms > 0 and (
@@ -474,6 +651,8 @@ def main():
                 switch_mode("mouse", now_ms, force_reset=True)
             elif current_mode == "idle":
                 switch_mode("mouse", now_ms)
+        elif calibration_enabled and mode_triggers.get("calibrate") and _trigger_fired(mode_triggers["calibrate"]) and time_since_change >= mode_refractory_ms:
+            switch_mode("calibrate", now_ms, force_reset=True)
         elif one_enabled and _trigger_fired(mode_triggers["one_hand"]) and time_since_change >= mode_refractory_ms:
             if current_mode == "one_hand":
                 switch_mode("one_hand", now_ms, force_reset=True)
@@ -611,6 +790,10 @@ def main():
                 seq_pending = None
                 last_evt_ms = now_ms
 
+        if calibration_active and (now_ms - calibration_start_ms) >= calibration_duration_ms:
+            _finalize_calibration(now_ms)
+            switch_mode("idle", now_ms, force_reset=True)
+
         if seq_active:
             def _update_undo_for_side(side_name):
                 """Handle undo gesture sequence for a specific hand side."""
@@ -660,7 +843,12 @@ def main():
             if exit_on_commit:
                 switch_mode("idle", now_ms, force_reset=True)
 
-        if seq_active:
+        if calibration_active:
+            elapsed = now_ms - calibration_start_ms
+            remaining = max(0, calibration_duration_ms - elapsed)
+            top = "CALIBRATION"
+            sub = f"Показывайте разные жесты | Осталось: {remaining / 1000:.1f}с"
+        elif seq_active:
             top = "REC"
             sub = ("BUF: " + " > ".join(seq_buffer[-6:])) if seq_buffer else "BUF: —"
             if seq_pending:
@@ -685,8 +873,12 @@ def main():
 
         if right:
             draw_landmarks(frame, right["lm"])
+            label = _active_pose_name(gR, last_R_label)
+            _draw_pose_label(frame, right["lm"], f"R: {label}", (0, 200, 255))
         if left:
             draw_landmarks(frame, left["lm"])
+            label = _active_pose_name(gL, last_L_label)
+            _draw_pose_label(frame, left["lm"], f"L: {label}", (0, 255, 180))
         if mouse_active:
             fh, fw = frame.shape[:2]
             tl = (int(mouse_rect["x"] * fw), int(mouse_rect["y"] * fh))
@@ -707,8 +899,11 @@ def main():
                 cv2.LINE_AA,
             )
         cv2.imshow("GCPC - Camera", frame)
-        if cv2.waitKey(1) & 0xFF == 27:
+        key = cv2.waitKey(1) & 0xFF
+        if key == 27:
             break
+        if calibration_enabled and chr(key).lower() == calibration_trigger_key:
+            switch_mode("calibrate", now_ms, force_reset=True)
 
     cap.release()
     cv2.destroyAllWindows()

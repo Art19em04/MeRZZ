@@ -39,6 +39,13 @@
     "swipe_speed_px": 900
   },
 
+  "__comment_calibration": "--------AUTO CALIBRATION SETTINGS---------",
+  "calibration": {
+    "enabled": true,
+    "duration_ms": 12000,
+    "trigger_key": "c"
+  },
+
   "__comment_sequence": "--------SEQUENCE RECORDING ENGINE---------",
   "sequence": {
     "arm_delay_ms": 420,
