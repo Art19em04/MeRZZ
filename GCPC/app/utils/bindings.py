@@ -8,42 +8,65 @@ from app.utils.config import resolve_side
 
 GestureTuple = Tuple[str, ...]
 
-
 def parse_mapping_key(raw_key: str, hands: Dict[str, str]) -> Tuple[str, List[str]] | None:
     """Parse a gesture mapping string into (side, [gestures]).
 
     The notation uses hyphen-delimited tokens where the first token optionally
     denotes which hand initiates the mapping (e.g. ``DOMINANT`` or ``LEFT``)
     and the last token of each segment represents the actual gesture name.
-    Segments are chained with ``>`` to describe ordered sequences.  For
-    example, ``DOMINANT-SEQUENCE-SWIPE_LEFT > DOMINANT-SEQUENCE-SWIPE_RIGHT``
-    reads as "start with the dominant hand performing ``SWIPE_LEFT`` inside
-    the sequence track, then expect the same hand to perform ``SWIPE_RIGHT``
-    as the next sequence gesture".
+    Segments are chained with ``>`` to describe ordered sequences, while ``+``
+    denotes simultaneous gestures that must be active together.  For example,
+    ``NON_DOMINANT-OPEN_PALM + DOMINANT-OPEN_PALM`` is treated as "both hands
+    showing an open palm".  Ordered sequences still follow ``>``, such as
+    ``NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST``.
     """
-    steps = raw_key.replace(" ", "").split(">")
+    steps = [s.strip() for s in raw_key.split(">") if s.strip()]
     gestures: List[str] = []
     side = None
 
-    for idx, step in enumerate(steps):
-        if not step:
+    for step in steps:
+        # Each step may contain simultaneous gestures separated by "+"
+        parts = [p.strip() for p in step.split("+") if p.strip()]
+        if not parts:
             continue
-        tokens = step.replace(" ", "").upper().split("-")
-        if not tokens:
+
+        step_side = None
+        step_gesture = None
+        step_sides: set[str] = set()
+
+        for part in parts:
+            tokens = part.replace(" ", "").upper().split("-")
+            if not tokens:
+                continue
+            first = tokens[0]
+            resolved = resolve_side(first, hands)
+            if resolved in {"RIGHT", "LEFT", "BOTH", "EITHER", "ANY"}:
+                step_sides.add(resolved)
+                if step_side is None:
+                    step_side = resolved
+                tokens = tokens[1:] if len(tokens) > 1 else []
+            if not tokens:
+                continue
+            gesture = tokens[-1]
+            if step_gesture and step_gesture != gesture:
+                raise ValueError(
+                    f"[GESTURE] incompatible simultaneous gestures in mapping {raw_key!r}"
+                )
+            step_gesture = gesture
+
+        if not step_gesture:
             continue
-        first = tokens[0]
-        resolved = resolve_side(first, hands)
-        if resolved in {"RIGHT", "LEFT", "BOTH", "EITHER", "ANY"}:
-            if side is None and idx == 0:
-                side = resolved
-            if len(tokens) > 1:
-                tokens = tokens[1:]
-            else:
-                tokens = []
-        if not tokens:
-            continue
-        gesture = tokens[-1]
-        gestures.append(gesture)
+
+        # Multiple explicit sides in the same "+" group imply BOTH hands.
+        if len(step_sides) >= 2:
+            step_side = "BOTH"
+        if step_side is None:
+            step_side = resolve_side("DOMINANT", hands)
+
+        if side is None:
+            side = step_side
+        gestures.append(step_gesture)
+
     if not gestures:
         return None
     if side is None:
