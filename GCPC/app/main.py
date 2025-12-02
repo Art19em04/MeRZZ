@@ -225,6 +225,22 @@ def main():
         pointer_side = dominant_side
     pointer_landmark = int(mouse_cfg.get("pointer_landmark", 8))
 
+    rect_cfg = mouse_cfg.get("control_rect", {}) or {}
+    rect_x = float(rect_cfg.get("x", 0.0) or 0.0)
+    rect_y = float(rect_cfg.get("y", 0.0) or 0.0)
+    rect_w = float(rect_cfg.get("width", 1.0) or 1.0)
+    rect_h = float(rect_cfg.get("height", 1.0) or 1.0)
+
+    def _clamp_rect(x, y, w, h):
+        """Ensure control rectangle fits into normalized [0..1] frame."""
+        x = max(0.0, min(1.0, x))
+        y = max(0.0, min(1.0, y))
+        w = max(1e-4, min(1.0 - x, w))
+        h = max(1e-4, min(1.0 - y, h))
+        return {"x": x, "y": y, "w": w, "h": h}
+
+    mouse_rect = _clamp_rect(rect_x, rect_y, rect_w, rect_h)
+
     def _read_mouse_binding(key):
         raw_value = mouse_cfg.get(key)
         binding = parse_single_binding(raw_value, hands)
@@ -515,16 +531,21 @@ def main():
             left_present = bool(left)
             if pointer_source:
                 tip = pointer_source["lm"][pointer_landmark]
-                target = (tip[0], tip[1])
+                target = (
+                    (tip[0] - mouse_rect["x"]) / mouse_rect["w"],
+                    (tip[1] - mouse_rect["y"]) / mouse_rect["h"],
+                )
                 if mouse_prev is None or mouse_smooth <= 0.0:
-                    mouse_prev = target
+                    smoothed = target
                 else:
                     prev_x, prev_y = mouse_prev
-                    mouse_prev = (
+                    smoothed = (
                         prev_x + (target[0] - prev_x) * (1.0 - mouse_smooth),
                         prev_y + (target[1] - prev_y) * (1.0 - mouse_smooth),
                     )
-                mx, my = mouse_prev
+                mx = max(0.0, min(1.0, smoothed[0]))
+                my = max(0.0, min(1.0, smoothed[1]))
+                mouse_prev = (mx, my)
                 mouse_move_normalized(mx, my)
                 left_active = _binding_active(
                     mouse_left_binding,
@@ -666,6 +687,14 @@ def main():
             draw_landmarks(frame, right["lm"])
         if left:
             draw_landmarks(frame, left["lm"])
+        if mouse_active:
+            fh, fw = frame.shape[:2]
+            tl = (int(mouse_rect["x"] * fw), int(mouse_rect["y"] * fh))
+            br = (
+                int((mouse_rect["x"] + mouse_rect["w"]) * fw),
+                int((mouse_rect["y"] + mouse_rect["h"]) * fh),
+            )
+            cv2.rectangle(frame, tl, br, (0, 255, 255), 2)
         if show_fps and fps is not None:
             cv2.putText(
                 frame,
