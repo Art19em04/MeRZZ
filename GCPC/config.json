@@ -73,6 +73,12 @@
     "smoothing_alpha": 0.4,
     "pointer_hand": "dominant",
     "pointer_landmark": 8,
+    "control_rect": {
+      "x": 0.45,
+      "y": 0.3,
+      "width": 0.5,
+      "height": 0.5
+    },
     "left_click_binding": "NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST",
     "right_click_binding": "NON_DOMINANT-PINCH_TAP"
   },
