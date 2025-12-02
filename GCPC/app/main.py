@@ -4,7 +4,16 @@ from typing import Dict, List
 import cv2
 from PySide6 import QtWidgets
 
-from app.gestures import GestureState, THUMB_TIP, INDEX_TIP, finger_flexion
+from app.gestures import (
+    GestureState,
+    INDEX_MCP,
+    INDEX_TIP,
+    MIDDLE_MCP,
+    PINKY_MCP,
+    THUMB_TIP,
+    WRIST,
+    finger_flexion,
+)
 from app.os_events_win import mouse_move_normalized, mouse_press, mouse_release, press_combo
 from app.osd import OSD
 from app.tracker_mediapipe import MediaPipeHandTracker
@@ -81,6 +90,26 @@ def main():
     calibration_enabled = bool(calib_cfg.get("enabled", True))
     calibration_duration_ms = int(calib_cfg.get("duration_ms", 12000))
     calibration_trigger_key = str(calib_cfg.get("trigger_key", "c")).lower()
+
+    def _split_duration(total_ms: int, parts: int) -> List[int]:
+        base = total_ms // parts
+        res = [base for _ in range(parts)]
+        for i in range(total_ms - base * parts):
+            res[i % parts] += 1
+        return res
+
+    stage_defs = [
+        {"name": "PINCH", "hint": "Сомкните большой+указательный"},
+        {"name": "FIST", "hint": "Сожмите кулак"},
+        {"name": "THUMBS_UP", "hint": "Большой вверх, остальные согнуты"},
+        {"name": "OPEN_PALM", "hint": "Разожмите ладонь и выпрямите пальцы"},
+    ]
+    stage_durations = _split_duration(calibration_duration_ms, len(stage_defs))
+    calibration_stages = [
+        stage_defs[i] | {"dur_ms": stage_durations[i]}
+        for i in range(len(stage_defs))
+    ]
+    calibration_total_ms = sum(stage["dur_ms"] for stage in calibration_stages)
 
     cap = open_camera(idx, w, h)
 
@@ -331,6 +360,8 @@ def main():
 
     calibration_active = False
     calibration_start_ms = 0
+    calibration_stage_ms = 0
+    calibration_stage_idx = 0
     calibration_data: Dict[str, List[float]] = {}
 
     one_hand_active = False
@@ -348,23 +379,70 @@ def main():
             "fist": [],
             "thumbs_thumb": [],
             "thumbs_others": [],
+            "open": [],
         }
 
-    def _record_calibration(state: GestureState, lm):
+    def _current_calibration_stage():
+        if 0 <= calibration_stage_idx < len(calibration_stages):
+            return calibration_stages[calibration_stage_idx]
+        return None
+
+    def _announce_stage(stage):
+        if not stage:
+            return
+        idx = calibration_stages.index(stage)
+        print(
+            f"[CALIBRATION] Stage {idx + 1}/{len(calibration_stages)}: "
+            f"{stage['name']} ({stage['dur_ms']} ms) — {stage['hint']}"
+        )
+
+    def _palm_span(lm) -> float:
+        span = _dist(lm[INDEX_MCP], lm[PINKY_MCP])
+        anchor = _dist(lm[WRIST], lm[MIDDLE_MCP])
+        return max(span, anchor, 1e-4)
+
+    def _record_calibration(stage_name: str | None, lm):
         nonlocal calibration_data
-        if not calibration_active:
+        if not calibration_active or not stage_name:
             return
         flex = finger_flexion(lm)
         pinch_d = _dist(lm[THUMB_TIP], lm[INDEX_TIP])
+        span = _palm_span(lm)
         avg_other = (flex["middle"] + flex["ring"] + flex["pinky"]) / 3.0
-        if state.pose_flags.get("PINCH"):
-            calibration_data["pinch"].append(pinch_d)
-        if state.pose_flags.get("FIST"):
+
+        if stage_name == "PINCH":
+            if pinch_d / span < 0.8 and flex["index"] > 0.12 and flex["thumb"] > 0.12:
+                calibration_data["pinch"].append(pinch_d)
+        elif stage_name == "FIST":
             avg_fist = (flex["index"] + flex["middle"] + flex["ring"] + flex["pinky"]) / 4.0
-            calibration_data["fist"].append(avg_fist)
-        if state.pose_flags.get("THUMBS_UP"):
-            calibration_data["thumbs_thumb"].append(flex["thumb"])
-            calibration_data["thumbs_others"].append(avg_other)
+            if avg_fist > 0.35:
+                calibration_data["fist"].append(avg_fist)
+        elif stage_name == "THUMBS_UP":
+            if flex["thumb"] < 0.5 and avg_other > 0.35:
+                calibration_data["thumbs_thumb"].append(flex["thumb"])
+                calibration_data["thumbs_others"].append(avg_other)
+        elif stage_name == "OPEN_PALM":
+            max_open = max(flex["index"], flex["middle"], flex["ring"], flex["pinky"])
+            if max_open < 0.55 and pinch_d / span > 0.9:
+                calibration_data["open"].append(max_open)
+
+    def _advance_calibration_stage(now_ms: int) -> bool:
+        nonlocal calibration_stage_idx, calibration_stage_ms
+        if not calibration_active:
+            return False
+        while True:
+            stage = _current_calibration_stage()
+            if not stage:
+                return False
+            elapsed = now_ms - calibration_stage_ms
+            if elapsed < stage["dur_ms"]:
+                return False
+            calibration_stage_idx += 1
+            if calibration_stage_idx >= len(calibration_stages):
+                _finalize_calibration(now_ms)
+                return True
+            calibration_stage_ms = now_ms
+            _announce_stage(_current_calibration_stage())
 
     def _finalize_calibration(now_ms: int):
         nonlocal calibration_active, cfg
@@ -403,11 +481,18 @@ def main():
             lambda v: _clamp(v * 0.9, 0.3, 0.95),
             "thumbs_up_others_min_flex",
         )
+        open_max = or_default(
+            calibration_data["open"],
+            0.9,
+            lambda v: _clamp(v * 1.05, 0.1, 0.7),
+            "open_palm_max_flex",
+        )
         updates = {
             "pinch_threshold": pinch_thr,
             "fist_threshold": fist_thr,
             "thumbs_up_thumb_max_flex": thumbs_thumb,
             "thumbs_up_others_min_flex": thumbs_other,
+            "open_palm_max_flex": open_max,
         }
         ge_cfg.update(updates)
         cfg["gesture_engine"] = ge_cfg
@@ -462,7 +547,10 @@ def main():
         if new_mode == "calibrate" and calibration_enabled:
             calibration_active = True
             calibration_start_ms = now_ms
+            calibration_stage_ms = now_ms
+            calibration_stage_idx = 0
             calibration_data = _new_calibration_data()
+            _announce_stage(_current_calibration_stage())
 
         # --- one-hand ---
         if new_mode != "one_hand":
@@ -497,6 +585,13 @@ def main():
         dt = now - last_frame_time
         last_frame_time = now
         now_ms = int(now * 1000)
+        finished_calibration = False
+        if calibration_active:
+            finished_calibration = _advance_calibration_stage(now_ms)
+        if finished_calibration:
+            switch_mode("idle", now_ms, force_reset=True)
+        current_stage = _current_calibration_stage() if calibration_active else None
+        current_stage_name = current_stage["name"] if current_stage else None
         if show_fps and dt > 0:
             inst = 1.0 / dt
             fps = inst if fps is None else (0.9 * fps + 0.1 * inst)
@@ -536,7 +631,7 @@ def main():
             evR = gR.update_and_classify(right["lm"]) or ""
             if evR:
                 last_R_label = evR
-            _record_calibration(gR, right["lm"])
+            _record_calibration(current_stage_name, right["lm"])
         else:
             gR.pose_flags.clear()
             if seq_active and seq_input_side == "RIGHT" and cancel_exit_ms > 0 and (
@@ -554,7 +649,7 @@ def main():
             evL = gL.update_and_classify(left["lm"]) or ""
             if evL:
                 last_L_label = evL
-            _record_calibration(gL, left["lm"])
+            _record_calibration(current_stage_name, left["lm"])
         else:
             gL.pose_flags.clear()
             if seq_active and seq_input_side == "LEFT" and cancel_exit_ms > 0 and (
@@ -756,10 +851,6 @@ def main():
                 seq_pending = None
                 last_evt_ms = now_ms
 
-        if calibration_active and (now_ms - calibration_start_ms) >= calibration_duration_ms:
-            _finalize_calibration(now_ms)
-            switch_mode("idle", now_ms, force_reset=True)
-
         if seq_active:
             def _update_undo_for_side(side_name):
                 """Handle undo gesture sequence for a specific hand side."""
@@ -810,10 +901,18 @@ def main():
                 switch_mode("idle", now_ms, force_reset=True)
 
         if calibration_active:
-            elapsed = now_ms - calibration_start_ms
-            remaining = max(0, calibration_duration_ms - elapsed)
-            top = "CALIBRATION"
-            sub = f"Показывайте разные жесты | Осталось: {remaining / 1000:.1f}с"
+            stage = current_stage
+            stage_elapsed = now_ms - calibration_stage_ms
+            stage_remaining = max(0, (stage["dur_ms"] if stage else 0) - stage_elapsed)
+            total_elapsed = now_ms - calibration_start_ms
+            total_remaining = max(0, calibration_total_ms - total_elapsed)
+            stage_name = stage["name"] if stage else "DONE"
+            hint = stage["hint"] if stage else "Калибровка завершена"
+            top = f"CAL {calibration_stage_idx + 1}/{len(calibration_stages)}: {stage_name}"
+            sub = (
+                f"{hint} | Этап: {stage_remaining / 1000:.1f}с | "
+                f"Всего: {total_remaining / 1000:.1f}с"
+            )
         elif seq_active:
             top = "REC"
             sub = ("BUF: " + " > ".join(seq_buffer[-6:])) if seq_buffer else "BUF: —"

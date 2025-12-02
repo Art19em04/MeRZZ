@@ -86,7 +86,13 @@ class GestureState:
         tu_thumb = self.cfg.get("thumbs_up_thumb_max_flex", 0.35)
         tu_others = self.cfg.get("thumbs_up_others_min_flex", 0.5)
         fist_thr = self.cfg.get("fist_threshold", 0.35)
-        is_open = (flex["index"] < 0.35 and flex["middle"] < 0.35 and flex["ring"] < 0.35 and flex["pinky"] < 0.35)
+        open_max = self.cfg.get("open_palm_max_flex", 0.35)
+        is_open = (
+            flex["index"] < open_max
+            and flex["middle"] < open_max
+            and flex["ring"] < open_max
+            and flex["pinky"] < open_max
+        )
         is_fist = (flex["index"] > fist_thr and flex["middle"] > fist_thr and flex["ring"] > fist_thr and flex[
             "pinky"] > fist_thr)
         is_thumbs_up = (flex["thumb"] < tu_thumb and avg_other > tu_others)
