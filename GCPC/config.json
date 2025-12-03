@@ -85,7 +85,7 @@
             "height": 0.5
         },
         "left_click_binding": "NON_DOMINANT-PINCH",
-        "right_click_binding": "NON_DOMINANT-OPEN_PALM"
+        "right_click_binding": "NON_DOMINANT-PINCH_MIDDLE"
     },
     "__comment_controls": "--------HIGH-LEVEL CONTROL GESTURES (SEQUENCE / CONFIRM / UNDO / COMMIT)---------",
     "controls": {
