@@ -203,6 +203,8 @@ def main():
         {"name": "FIST", "hint": "Сожмите кулак"},
         {"name": "THUMBS_UP", "hint": "Большой вверх, остальные согнуты"},
         {"name": "OPEN_PALM", "hint": "Разожмите ладонь и выпрямите пальцы"},
+        {"name": "SWIPE_RIGHT", "hint": "Проведите ладонью вправо"},
+        {"name": "SWIPE_LEFT", "hint": "Проведите ладонью влево"},
     ]
     stage_durations = _split_duration(calibration_duration_ms, len(stage_defs))
     calibration_stages = [
@@ -565,6 +567,10 @@ def main():
     calibration_stage_ms = 0
     calibration_stage_idx = -1
     calibration_data: Dict[str, List[float]] = {}
+    calibration_motion_prev: Dict[str, tuple[int, tuple[float, float]] | None] = {
+        "RIGHT": None,
+        "LEFT": None,
+    }
 
     one_hand_active = False
     mouse_active = False
@@ -582,6 +588,10 @@ def main():
             "thumbs_thumb": [],
             "thumbs_others": [],
             "open": [],
+            "swipe_right_dx": [],
+            "swipe_left_dx": [],
+            "swipe_speed": [],
+            "swipe_ratio": [],
         }
 
     def _current_calibration_stage():
@@ -593,6 +603,8 @@ def main():
         nonlocal calibration_stage_idx, calibration_stage_ms
         calibration_stage_idx = idx
         calibration_stage_ms = now_ms
+        calibration_motion_prev["RIGHT"] = None
+        calibration_motion_prev["LEFT"] = None
         stage = _current_calibration_stage()
         _announce_stage(stage)
 
@@ -610,14 +622,19 @@ def main():
         anchor = _dist(lm[WRIST], lm[MIDDLE_MCP])
         return max(span, anchor, 1e-4)
 
-    def _record_calibration(stage_name: str | None, lm):
+    def _record_calibration(stage_name: str | None, lm, side: str | None):
         nonlocal calibration_data
         if not calibration_active or not stage_name:
             return
+        now_ms = int(time.time() * 1000)
         flex = finger_flexion(lm)
         pinch_d = _dist(lm[THUMB_TIP], lm[INDEX_TIP])
         span = _palm_span(lm)
         avg_other = (flex["middle"] + flex["ring"] + flex["pinky"]) / 3.0
+        prev = None
+        if side:
+            prev = calibration_motion_prev.get(side)
+            calibration_motion_prev[side] = (now_ms, lm[WRIST])
 
         if stage_name == "PINCH":
             if pinch_d / span < 0.8 and flex["index"] > 0.12 and flex["thumb"] > 0.12:
@@ -634,6 +651,22 @@ def main():
             max_open = max(flex["index"], flex["middle"], flex["ring"], flex["pinky"])
             if max_open < 0.55 and pinch_d / span > 0.9:
                 calibration_data["open"].append(max_open)
+        elif stage_name in {"SWIPE_RIGHT", "SWIPE_LEFT"} and side and prev:
+            prev_ts, prev_pt = prev
+            dt = now_ms - prev_ts
+            if dt > 0:
+                dx = lm[WRIST][0] - prev_pt[0]
+                dy = lm[WRIST][1] - prev_pt[1]
+                ratio = abs(dy) / max(abs(dx), 1e-4)
+                speed = dx / (dt / 1000.0)
+                if stage_name == "SWIPE_RIGHT" and dx > 0:
+                    calibration_data["swipe_right_dx"].append(dx)
+                    calibration_data["swipe_speed"].append(speed)
+                    calibration_data["swipe_ratio"].append(ratio)
+                elif stage_name == "SWIPE_LEFT" and dx < 0:
+                    calibration_data["swipe_left_dx"].append(-dx)
+                    calibration_data["swipe_speed"].append(-speed)
+                    calibration_data["swipe_ratio"].append(ratio)
 
     def _advance_calibration_stage(now_ms: int) -> bool:
         nonlocal calibration_stage_idx, calibration_stage_ms
@@ -698,12 +731,33 @@ def main():
             lambda v: _clamp(v * 1.05, 0.1, 0.7),
             "open_palm_max_flex",
         )
+        swipe_min_dx = or_default(
+            calibration_data["swipe_right_dx"] + calibration_data["swipe_left_dx"],
+            0.6,
+            lambda v: _clamp(v * 0.8, 0.02, 0.5),
+            "swipe_min_dx",
+        )
+        swipe_min_speed = or_default(
+            calibration_data["swipe_speed"],
+            0.4,
+            lambda v: _clamp(v * 0.8, 0.15, 3.0),
+            "swipe_min_speed",
+        )
+        swipe_ratio_max = or_default(
+            calibration_data["swipe_ratio"],
+            0.8,
+            lambda v: _clamp(v * 1.2, 0.05, 1.5),
+            "swipe_max_dy_ratio",
+        )
         updates = {
             "pinch_threshold": pinch_thr,
             "fist_threshold": fist_thr,
             "thumbs_up_thumb_max_flex": thumbs_thumb,
             "thumbs_up_others_min_flex": thumbs_other,
             "open_palm_max_flex": open_max,
+            "swipe_min_dx": swipe_min_dx,
+            "swipe_min_speed": swipe_min_speed,
+            "swipe_max_dy_ratio": swipe_ratio_max,
         }
         ge_cfg.update(updates)
         cfg["gesture_engine"] = ge_cfg
@@ -843,7 +897,7 @@ def main():
             evR = gR.update_and_classify(right["lm"]) or ""
             if evR:
                 last_R_label = evR
-            _record_calibration(current_stage_name, right["lm"])
+            _record_calibration(current_stage_name, right["lm"], "RIGHT")
         else:
             gR.pose_flags.clear()
             if seq_active and seq_input_side == "RIGHT" and cancel_exit_ms > 0 and (
@@ -861,7 +915,7 @@ def main():
             evL = gL.update_and_classify(left["lm"]) or ""
             if evL:
                 last_L_label = evL
-            _record_calibration(current_stage_name, left["lm"])
+            _record_calibration(current_stage_name, left["lm"], "LEFT")
         else:
             gL.pose_flags.clear()
             if seq_active and seq_input_side == "LEFT" and cancel_exit_ms > 0 and (

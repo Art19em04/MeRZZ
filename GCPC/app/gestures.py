@@ -57,7 +57,7 @@ class GestureState:
         self.cfg = cfg
         self.last_emit_global = 0.0
         self.last_emit_per = {}
-        self.wrist_hist = deque(maxlen=6)
+        self.wrist_hist = deque(maxlen=20)
         self.prev_pinch = False
         self.hold_latched = False
         self.pose_flags = {}
@@ -115,6 +115,39 @@ class GestureState:
             emit = emit or "THUMBS_UP"
         if is_open and ready and self._can_emit("OPEN_PALM", now):
             emit = emit or "OPEN_PALM"
+        swipe_window_ms = float(self.cfg.get("swipe_window_ms", 320))
+        swipe_min_dx = float(self.cfg.get("swipe_min_dx", 0.1))
+        swipe_max_ratio = float(self.cfg.get("swipe_max_dy_ratio", 0.6))
+        swipe_min_speed = float(self.cfg.get("swipe_min_speed", 0.5))
+
+        def _swipe_from_history():
+            if len(self.wrist_hist) < 2:
+                return None
+            window_start = now - swipe_window_ms
+            oldest = None
+            for ts, pt in self.wrist_hist:
+                if ts >= window_start:
+                    oldest = (ts, pt)
+                    break
+            if not oldest:
+                oldest = self.wrist_hist[0]
+            ts0, p0 = oldest
+            ts1, p1 = self.wrist_hist[-1]
+            dt = max(1.0, ts1 - ts0)
+            dx = p1[0] - p0[0]
+            dy = p1[1] - p0[1]
+            ratio = abs(dy) / max(abs(dx), 1e-4)
+            speed = dx / (dt / 1000.0)
+            if dx > swipe_min_dx and ratio <= swipe_max_ratio and speed >= swipe_min_speed:
+                return "SWIPE_RIGHT"
+            if -dx > swipe_min_dx and ratio <= swipe_max_ratio and -speed >= swipe_min_speed:
+                return "SWIPE_LEFT"
+            return None
+
+        swipe_evt = _swipe_from_history()
+        if swipe_evt and self._can_emit(swipe_evt, now):
+            emit = emit or swipe_evt
+
         if emit:
             self._mark_emit(emit, now)
         self.prev_pinch = pinch

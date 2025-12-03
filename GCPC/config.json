@@ -30,7 +30,15 @@
     "fist_threshold": 0.8017794483886274,
     "thumbs_up_thumb_max_flex": 0.36319807365079,
     "thumbs_up_others_min_flex": 0.702041654027712,
-    "open_palm_max_flex": 0.35
+    "open_palm_max_flex": 0.35,
+    "swipe_window_ms": 320,
+    "swipe_min_dx": 0.1,
+    "swipe_min_speed": 0.7,
+    "swipe_max_dy_ratio": 0.6,
+    "per_gesture_min_ms": {
+      "SWIPE_LEFT": 650,
+      "SWIPE_RIGHT": 650
+    }
   },
   "__comment_calibration": "--------AUTO CALIBRATION SETTINGS---------",
   "calibration": {
