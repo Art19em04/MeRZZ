@@ -3,3 +3,8 @@ session_id,backend,providers,FPS_avg,e2e_p50,e2e_p95,interaction,scenario,task_t
 632b0f11d77b4c2ca52de61a3e49a498,cpu,['mediapipe'],,,,,,,,
 3ecb6315381f40589221f7d2be045964,cpu,['mediapipe'],,,,,,,,
 d1caf38b033c46df82a54daa16593253,cpu,['mediapipe'],,,,,,,,
+1c1bc86031d5415caff06bb118ee6d9d,cpu,['mediapipe'],,,,,,,,
+d714f0fe76fa4c5b9f1d8d950baa603a,cpu,['mediapipe'],,,,,,,,
+bb97f15c97f9447cadae4fff376d9eb8,cpu,['mediapipe'],,,,,,,,
+4fa80540ce404818bbea36f8cb36de50,cpu,['mediapipe'],,,,,,,,
+aab1204208ca4786bd38d46cfb3d5327,cpu,['mediapipe'],,,,,,,,

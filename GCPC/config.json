@@ -26,11 +26,19 @@
   "gesture_engine": {
     "clutch": "none",
     "cooldown_ms": 420,
-    "pinch_threshold": 0.01905034890127641,
-    "fist_threshold": 0.8017794483886274,
-    "thumbs_up_thumb_max_flex": 0.36319807365079,
-    "thumbs_up_others_min_flex": 0.702041654027712,
-    "open_palm_max_flex": 0.35
+    "pinch_threshold": 0.051455004647776054,
+    "fist_threshold": 0.6986375075570722,
+    "thumbs_up_thumb_max_flex": 0.2664826115396578,
+    "thumbs_up_others_min_flex": 0.5934635993628441,
+    "open_palm_max_flex": 0.1,
+    "swipe_window_ms": 320,
+    "swipe_min_dx": 0.02,
+    "swipe_min_speed": 0.15,
+    "swipe_max_dy_ratio": 1.5,
+    "per_gesture_min_ms": {
+      "SWIPE_LEFT": 650,
+      "SWIPE_RIGHT": 650
+    }
   },
   "__comment_calibration": "--------AUTO CALIBRATION SETTINGS---------",
   "calibration": {
@@ -112,21 +120,19 @@
   "command_mappings": {
     "functional": {
       "refractory_ms": 200,
-      "NON_DOMINANT-FIST": "MODE_ONE_HAND",
-      "BOTH-OPEN_PALM": "MODE_RECORD",
+      "BOTH-THUMBS_UP": "MODE_ONE_HAND",
+      "BOTH-FIST": "MODE_RECORD",
       "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
-      "NON_DOMINANT-OPEN_PALM + DOMINANT-OPEN_PALM": "MODE_EXIT"
+      "BOTH-OPEN_PALM": "MODE_EXIT"
     },
     "complex_gestures": {
-      "DOMINANT-OPEN_PALM > DOMINANT-FIST": "ALT+F4",
       "DOMINANT-FIST > DOMINANT-FIST": "CTRL+SHIFT+N"
     },
     "single_gestures": {
-      "NON_DOMINANT-PINCH_TAP": "CTRL+C",
-      "NON_DOMINANT-PINCH": "CTRL+V",
-      "NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST": "CTRL+Z",
-      "DOMINANT-OPEN_PALM": "ALT+SHIFT+ESC",
-      "DOMINANT-FIST": "ALT+ESC"
+      "NON_DOMINANT-PINCH": "CTRL+C",
+      "NON_DOMINANT-FIST": "CTRL+V",
+      "DOMINANT-SWIPE_LEFT": "ALT+SHIFT+TAB",
+      "DOMINANT-SWIPE_RIGHT": "ALT+TAB"
     }
   }
 }
