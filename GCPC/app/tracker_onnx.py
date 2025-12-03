@@ -81,6 +81,7 @@ class ONNXHandTracker:
         except Exception:
             pass
         self.sess = ort.InferenceSession(mp, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+        self.providers = list(self.sess.get_providers())
         print("[ONNX] Providers:", self.sess.get_providers())
         i0 = self.sess.get_inputs()[0]
         self.input_name = i0.name
