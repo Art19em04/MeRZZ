@@ -68,6 +68,7 @@ class DetectorONNX:
         except Exception:
             pass
         self.sess = ort.InferenceSession(path, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+        self.providers = list(self.sess.get_providers())
         self.inp = self.sess.get_inputs()[0]
         self.in_h, self.in_w = int(input_size[0]), int(input_size[1])
         self.out_names = [o.name for o in self.sess.get_outputs()]
@@ -114,6 +115,7 @@ class LandmarkONNX:
         except Exception:
             pass
         self.sess = ort.InferenceSession(path, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+        self.providers = list(self.sess.get_providers())
         self.inp = self.sess.get_inputs()[0]
         self.in_h, self.in_w = int(input_size[0]), int(input_size[1])
         self.out_names = [o.name for o in self.sess.get_outputs()]
@@ -192,6 +194,10 @@ class TwoStageHandTracker:
         self.score_th = score_th
         self.nms_th = nms_th
         self.presence_th = presence_th
+        det_providers = getattr(self.det, "providers", [])
+        lmk_providers = getattr(self.lmk, "providers", [])
+        merged = list(dict.fromkeys(det_providers + lmk_providers))
+        self.providers = merged
 
     def process(self, rgb):
         """Run two-stage detection + landmark pipeline and output hands."""

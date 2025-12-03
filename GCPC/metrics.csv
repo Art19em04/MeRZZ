@@ -1,0 +1,5 @@
+session_id,backend,providers,FPS_avg,e2e_p50,e2e_p95,interaction,scenario,task_time_ms,task_success,false_activations
+0c0c4ef520ec4407aae21479f033a347,cpu,['mediapipe'],,,,,,,,
+632b0f11d77b4c2ca52de61a3e49a498,cpu,['mediapipe'],,,,,,,,
+3ecb6315381f40589221f7d2be045964,cpu,['mediapipe'],,,,,,,,
+d1caf38b033c46df82a54daa16593253,cpu,['mediapipe'],,,,,,,,

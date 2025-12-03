@@ -26,10 +26,10 @@
   "gesture_engine": {
     "clutch": "none",
     "cooldown_ms": 420,
-    "pinch_threshold": 0.05564512825299441,
-    "fist_threshold": 0.6444952612983096,
-    "thumbs_up_thumb_max_flex": 0.06815964219488951,
-    "thumbs_up_others_min_flex": 0.5868037334858223,
+    "pinch_threshold": 0.01905034890127641,
+    "fist_threshold": 0.8017794483886274,
+    "thumbs_up_thumb_max_flex": 0.36319807365079,
+    "thumbs_up_others_min_flex": 0.702041654027712,
     "open_palm_max_flex": 0.35
   },
   "__comment_calibration": "--------AUTO CALIBRATION SETTINGS---------",
@@ -84,7 +84,7 @@
       "input_hand": "dominant",
       "candidate_ignore": [],
       "confirm": {
-        "binding": "NON_DOMINANT-PINCH_TAP",
+        "binding": "NON_DOMINANT-PINCH",
         "dwell_ms": 220,
         "refractory_ms": 700
       },
@@ -100,6 +100,14 @@
       }
     }
   },
+  "__comment_ui": "--------USER INTERFACE / SHORTCUTS---------",
+  "ui": {
+    "controls_panel": {
+      "enabled": true,
+      "start_scenario_shortcut": "s",
+      "end_scenario_shortcut": "e"
+    }
+  },
   "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
   "command_mappings": {
     "functional": {
@@ -110,7 +118,8 @@
       "NON_DOMINANT-OPEN_PALM + DOMINANT-OPEN_PALM": "MODE_EXIT"
     },
     "complex_gestures": {
-      "DOMINANT-SEQUENCE-OPEN_PALM > DOMINANT-FIST": "ALT+F4"
+      "DOMINANT-OPEN_PALM > DOMINANT-FIST": "ALT+F4",
+      "DOMINANT-FIST > DOMINANT-FIST": "CTRL+SHIFT+N"
     },
     "single_gestures": {
       "NON_DOMINANT-PINCH_TAP": "CTRL+C",

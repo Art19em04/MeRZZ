@@ -1,8 +1,11 @@
+import csv
+import statistics
 import time
+import uuid
 from typing import Dict, List
 
 import cv2
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.gestures import (
     GestureState,
@@ -29,8 +32,77 @@ from app.utils.bindings import (
     trigger_label,
 )
 from app.utils.camera import draw_landmarks, open_camera
-from app.utils.config import build_hands, load_config, resolve_side, save_config
+from app.utils.config import APP_DIR, build_hands, load_config, resolve_side, save_config
 from app.utils.triggers import DebouncedTrigger
+
+
+METRIC_FIELDS = [
+    "session_id",
+    "backend",
+    "providers",
+    "FPS_avg",
+    "e2e_p50",
+    "e2e_p95",
+    "interaction",
+    "scenario",
+    "task_time_ms",
+    "task_success",
+    "false_activations",
+]
+
+
+def _append_metrics_row(row):
+    """Persist a single metrics row to ``metrics.csv`` with a shared header."""
+    path = APP_DIR.parent / "metrics.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    exists = path.exists()
+    with path.open("a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=METRIC_FIELDS)
+        if not exists:
+            writer.writeheader()
+        writer.writerow({key: row.get(key, "") for key in METRIC_FIELDS})
+
+
+class ControlPanel(QtWidgets.QWidget):
+    """Tiny always-on-top widget for interaction mode and armed toggles."""
+
+    def __init__(self):
+        super().__init__(None, QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint)
+        self.setWindowTitle("GCPC Controls")
+        self.interaction_mode = "gestures"
+        self.armed = True
+
+        layout = QtWidgets.QVBoxLayout(self)
+        self.interaction_btn = QtWidgets.QPushButton(self._interaction_label())
+        self.interaction_btn.clicked.connect(self._toggle_interaction)
+        self.armed_btn = QtWidgets.QPushButton(self._armed_label())
+        self.armed_btn.setCheckable(True)
+        self.armed_btn.setChecked(True)
+        self.armed_btn.clicked.connect(self._toggle_armed)
+
+        layout.addWidget(self.interaction_btn)
+        layout.addWidget(self.armed_btn)
+
+    def _interaction_label(self):
+        mode = "GESTURES" if self.interaction_mode == "gestures" else "MK"
+        return f"Interaction: {mode}"
+
+    def _toggle_interaction(self):
+        self.interaction_mode = "mk" if self.interaction_mode == "gestures" else "gestures"
+        self.interaction_btn.setText(self._interaction_label())
+
+    def _armed_label(self):
+        return "Armed" if self.armed else "Disarmed"
+
+    def _toggle_armed(self):
+        self.armed = self.armed_btn.isChecked()
+        self.armed_btn.setText(self._armed_label())
+
+    def current_interaction(self) -> str:
+        return self.interaction_mode
+
+    def is_armed(self) -> bool:
+        return self.armed
 
 
 def main():
@@ -38,6 +110,34 @@ def main():
     app = QtWidgets.QApplication([])
     osd = OSD()
     osd.show()
+
+    ui_cfg = cfg.get("ui", {})
+    panel_cfg = ui_cfg.get("controls_panel", {})
+    panel_enabled = bool(panel_cfg.get("enabled", True))
+    start_scenario_key = str(panel_cfg.get("start_scenario_shortcut", "Alt+S"))
+    end_scenario_key = str(panel_cfg.get("end_scenario_shortcut", "Alt+E"))
+
+    panel = ControlPanel() if panel_enabled else None
+    if panel:
+        panel.show()
+
+    session_id = uuid.uuid4().hex
+    latencies: List[float] = []
+    frames_processed = 0
+    last_frame_capture_ns: int | None = None
+    session_start_ns = time.perf_counter_ns()
+    false_activations_total = 0
+    scenario_active = False
+    scenario_name = ""
+    scenario_start_ns: int | None = None
+    scenario_false_baseline = 0
+    def _interaction_mode():
+        return panel.current_interaction() if panel else "gestures"
+
+    def _armed_state():
+        return panel.is_armed() if panel else True
+
+    scenario_interaction = _interaction_mode()
 
     def _dist(a, b):
         dx, dy = a[0] - b[0], a[1] - b[1]
@@ -120,6 +220,108 @@ def main():
         max_hands=dcfg.get("max_num_hands"),
         model_complexity=dcfg.get("model_complexity"),
     )
+
+    providers = getattr(tracker, "providers", []) or []
+    backend_kind = "gpu" if any("CUDA" in p.upper() or "GPU" in p.upper() for p in providers) else "cpu"
+    providers_str = str(providers)
+    print(f"[SESSION] id={session_id} backend={backend_kind} providers={providers}")
+    _append_metrics_row(
+        {
+            "session_id": session_id,
+            "backend": backend_kind,
+            "providers": providers_str,
+        }
+    )
+
+    def _session_summary_row(final_ns: int | None = None) -> Dict[str, str | float]:
+        """Prepare a metrics row describing session-level performance."""
+        end_ns = final_ns or time.perf_counter_ns()
+        duration_s = max(1e-9, (end_ns - session_start_ns) / 1e9)
+        fps_avg = frames_processed / duration_s if frames_processed else 0.0
+        e2e_p50 = statistics.median(latencies) if latencies else None
+        e2e_p95 = _percentile(latencies, 0.95)
+        return {
+            "session_id": session_id,
+            "backend": backend_kind,
+            "providers": providers_str,
+            "FPS_avg": round(fps_avg, 3),
+            "e2e_p50": round(e2e_p50, 3) if e2e_p50 is not None else "",
+            "e2e_p95": round(e2e_p95, 3) if e2e_p95 is not None else "",
+        }
+
+    def _start_scenario():
+        nonlocal scenario_active, scenario_name, scenario_start_ns, scenario_false_baseline, scenario_interaction
+        if scenario_active:
+            print("[SCENARIO] Already active; end current scenario first.")
+            return
+        text, ok = QtWidgets.QInputDialog.getText(
+            osd, "Start scenario", "Scenario name:", text=scenario_name or "",
+        )
+        if not ok or not text.strip():
+            return
+        scenario_name = text.strip()
+        scenario_interaction = _interaction_mode()
+        scenario_start_ns = time.perf_counter_ns()
+        scenario_false_baseline = false_activations_total
+        scenario_active = True
+        print(f"[SCENARIO] START name={scenario_name!r} interaction={scenario_interaction}")
+
+    def _end_scenario():
+        nonlocal scenario_active, scenario_start_ns
+        if not scenario_active:
+            print("[SCENARIO] No active scenario to end.")
+            return
+        choice, ok = QtWidgets.QInputDialog.getItem(
+            osd,
+            "End scenario",
+            "Success? (1=yes, 0=no)",
+            ["1", "0"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        now_ns = time.perf_counter_ns()
+        elapsed_ms = (now_ns - (scenario_start_ns or now_ns)) / 1e6
+        task_success = int(choice)
+        false_in_scenario = false_activations_total - scenario_false_baseline
+        _append_metrics_row(
+            {
+                "session_id": session_id,
+                "backend": backend_kind,
+                "providers": providers_str,
+                "interaction": scenario_interaction,
+                "scenario": scenario_name,
+                "task_time_ms": round(elapsed_ms, 3),
+                "task_success": task_success,
+                "false_activations": false_in_scenario,
+            }
+        )
+        scenario_active = False
+        scenario_start_ns = None
+        print(
+            f"[SCENARIO] END name={scenario_name!r} success={task_success} "
+            f"time_ms={elapsed_ms:.3f} false={false_in_scenario}"
+        )
+
+    def _send_hotkey(combo: str):
+        nonlocal false_activations_total
+        now_ns = time.perf_counter_ns()
+        if last_frame_capture_ns is not None:
+            latencies.append((now_ns - last_frame_capture_ns) / 1e6)
+        armed = _armed_state()
+        active = scenario_active
+        if not (active and armed):
+            false_activations_total += 1
+        press_combo(combo)
+
+    shortcut_parent = panel if panel else osd
+    start_shortcut = QtGui.QShortcut(QtGui.QKeySequence(start_scenario_key), shortcut_parent)
+    start_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
+    start_shortcut.activated.connect(_start_scenario)
+    end_shortcut = QtGui.QShortcut(QtGui.QKeySequence(end_scenario_key), shortcut_parent)
+    end_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
+    end_shortcut.activated.connect(_end_scenario)
 
     gR = GestureState(cfg["gesture_engine"])
     gL = GestureState(cfg["gesture_engine"])
@@ -587,6 +789,9 @@ def main():
             break
         if mirror:
             frame = cv2.flip(frame, 1)
+        frame_capture_ns = time.perf_counter_ns()
+        last_frame_capture_ns = frame_capture_ns
+        frames_processed += 1
 
         now = time.time()
         dt = now - last_frame_time
@@ -753,7 +958,7 @@ def main():
                 combo = lookup_mapping(single_map, side, event)
                 if combo and (now_ms - last_sent_ms) >= refractory_ms:
                     print(f"[ONE-HAND] {side} {event} -> {combo}")
-                    press_combo(combo)
+                    _send_hotkey(combo)
                     last_sent_ms = now_ms
                     last_single_action = f"LAST: {side} {event} → {combo}"
                     triggered = True
@@ -767,7 +972,7 @@ def main():
                     combo = lookup_mapping(single_map, "EITHER", event)
                     if combo and (now_ms - last_sent_ms) >= refractory_ms:
                         print(f"[ONE-HAND] {side} {event} -> {combo}")
-                        press_combo(combo)
+                        _send_hotkey(combo)
                         last_sent_ms = now_ms
                         last_single_action = f"LAST: {side} {event} → {combo}"
                         break
@@ -896,7 +1101,7 @@ def main():
             if combo and (now_ms - last_sent_ms) >= refractory_ms:
                 joined = " > ".join(seq_buffer)
                 print(f"[SEQ-COMMIT] {seq_hand} {joined} -> {combo}")
-                press_combo(combo)
+                _send_hotkey(combo)
                 last_sent_ms = now_ms
             else:
                 joined = " > ".join(seq_buffer) if seq_buffer else "—"
@@ -971,12 +1176,19 @@ def main():
                 cv2.LINE_AA,
             )
         cv2.imshow("GCPC - Camera", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key == 27:
+        raw_key = cv2.waitKey(1)
+        key = raw_key & 0xFF if raw_key != -1 else -1
+        if raw_key == 27 or key == 27:
             break
-        if calibration_enabled and chr(key).lower() == calibration_trigger_key:
-            switch_mode("calibrate", now_ms, force_reset=True)
+        if calibration_enabled and key != -1:
+            try:
+                key_chr = chr(key).lower()
+            except ValueError:
+                key_chr = ""
+            if key_chr == calibration_trigger_key:
+                switch_mode("calibrate", now_ms, force_reset=True)
 
+    _append_metrics_row(_session_summary_row())
     cap.release()
     cv2.destroyAllWindows()
 

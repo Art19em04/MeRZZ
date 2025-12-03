@@ -5,6 +5,7 @@ class MediaPipeHandTracker:
     def __init__(self, min_det=0.6, min_trk=0.5, max_hands=2, model_complexity=1):
         import mediapipe as mp
         self.mp = mp
+        self.providers = ["mediapipe"]
         self.hands = mp.solutions.hands.Hands(
             static_image_mode=False,
             max_num_hands=max_hands,
