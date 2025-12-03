@@ -5,3 +5,8 @@ session_id,backend,providers,FPS_avg,e2e_p50,e2e_p95,interaction,scenario,task_t
 506f445c2d0b4070b98bed2d3de12a9b,cpu,['mediapipe'],,,,mk,Open wiki,16206.573,1,0
 506f445c2d0b4070b98bed2d3de12a9b,cpu,['mediapipe'],,,,gestures,Swap between windows + copy file,80317.976,1,3
 506f445c2d0b4070b98bed2d3de12a9b,cpu,['mediapipe'],,,,mk,Swap between windows + copy file,13401.183,1,0
+c6fe76666e434188a5c2b2c073217328,cpu,['mediapipe'],,,,gestures,Open wiki,80433.011,1,4
+9119fd32ba934337aa696fc109dd9973,cpu,['mediapipe'],,,,,,,,
+9119fd32ba934337aa696fc109dd9973,cpu,['mediapipe'],,,,gestures,Open wiki,59379.759,1,0
+9119fd32ba934337aa696fc109dd9973,cpu,['mediapipe'],,,,gestures,Swap between windows + copy file,58862.586,0,0
+ead7885bc488416f9b899f8551535fc4,cpu,['mediapipe'],,,,,,,,

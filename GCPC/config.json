@@ -1,6 +1,6 @@
 {
     "__comment_backend": "-------CORE BACKEND SETTINGS-------",
-    "backend": "mediapipe",
+    "backend": "onnx",
     "onnx_landmarks": true,
     "__comment_detector": "-------DETECTOR SETTINGS---------",
     "detector": {
