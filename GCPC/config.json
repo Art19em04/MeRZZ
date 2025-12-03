@@ -100,6 +100,14 @@
       }
     }
   },
+  "__comment_ui": "--------USER INTERFACE / SHORTCUTS---------",
+  "ui": {
+    "controls_panel": {
+      "enabled": true,
+      "start_scenario_shortcut": "Alt+S",
+      "end_scenario_shortcut": "Alt+E"
+    }
+  },
   "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
   "command_mappings": {
     "functional": {

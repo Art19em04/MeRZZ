@@ -110,8 +110,16 @@ def main():
     app = QtWidgets.QApplication([])
     osd = OSD()
     osd.show()
-    panel = ControlPanel()
-    panel.show()
+
+    ui_cfg = cfg.get("ui", {})
+    panel_cfg = ui_cfg.get("controls_panel", {})
+    panel_enabled = bool(panel_cfg.get("enabled", True))
+    start_scenario_key = str(panel_cfg.get("start_scenario_shortcut", "Alt+S"))
+    end_scenario_key = str(panel_cfg.get("end_scenario_shortcut", "Alt+E"))
+
+    panel = ControlPanel() if panel_enabled else None
+    if panel:
+        panel.show()
 
     session_id = uuid.uuid4().hex
     latencies: List[float] = []
@@ -123,7 +131,13 @@ def main():
     scenario_name = ""
     scenario_start_ns: int | None = None
     scenario_false_baseline = 0
-    scenario_interaction = panel.current_interaction()
+    def _interaction_mode():
+        return panel.current_interaction() if panel else "gestures"
+
+    def _armed_state():
+        return panel.is_armed() if panel else True
+
+    scenario_interaction = _interaction_mode()
 
     def _dist(a, b):
         dx, dy = a[0] - b[0], a[1] - b[1]
@@ -246,7 +260,7 @@ def main():
         if not ok or not text.strip():
             return
         scenario_name = text.strip()
-        scenario_interaction = panel.current_interaction()
+        scenario_interaction = _interaction_mode()
         scenario_start_ns = time.perf_counter_ns()
         scenario_false_baseline = false_activations_total
         scenario_active = True
@@ -295,16 +309,17 @@ def main():
         now_ns = time.perf_counter_ns()
         if last_frame_capture_ns is not None:
             latencies.append((now_ns - last_frame_capture_ns) / 1e6)
-        armed = panel.is_armed()
+        armed = _armed_state()
         active = scenario_active
         if not (active and armed):
             false_activations_total += 1
         press_combo(combo)
 
-    start_shortcut = QtGui.QShortcut(QtGui.QKeySequence("F9"), panel)
+    shortcut_parent = panel if panel else osd
+    start_shortcut = QtGui.QShortcut(QtGui.QKeySequence(start_scenario_key), shortcut_parent)
     start_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
     start_shortcut.activated.connect(_start_scenario)
-    end_shortcut = QtGui.QShortcut(QtGui.QKeySequence("F10"), panel)
+    end_shortcut = QtGui.QShortcut(QtGui.QKeySequence(end_scenario_key), shortcut_parent)
     end_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
     end_shortcut.activated.connect(_end_scenario)
 
