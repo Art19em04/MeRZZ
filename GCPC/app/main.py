@@ -15,7 +15,7 @@ from app.gestures import (
     PINKY_MCP,
     THUMB_TIP,
     WRIST,
-    finger_flexion,
+    finger_flexion, MIDDLE_TIP,
 )
 from app.os_events_win import mouse_move_normalized, mouse_press, mouse_release, press_combo
 from app.osd import OSD
