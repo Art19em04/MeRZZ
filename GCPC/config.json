@@ -112,6 +112,13 @@
             "enabled": true,
             "start_scenario_shortcut": "s",
             "end_scenario_shortcut": "e"
+        },
+        "hand_windows": {
+            "enabled": true,
+            "size": 220,
+            "padding": 0.2,
+            "margin_px": 16,
+            "show_full_camera": false
         }
     },
     "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
