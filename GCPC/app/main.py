@@ -19,7 +19,7 @@ from app.gestures import (
     WRIST,
     finger_flexion, MIDDLE_TIP,
 )
-from app.os_events_win import mouse_move_normalized, mouse_press, mouse_release, press_combo
+from app.os_events_win import mouse_move_normalized, mouse_press, mouse_release, mouse_scroll, press_combo
 from app.osd import OSD
 from app.tracker_mediapipe import MediaPipeHandTracker
 from app.utils.bindings import (
@@ -696,16 +696,32 @@ def main():
     mouse_right_binding, mouse_right_label = _read_mouse_binding(
         "right_click_binding"
     )
+    scroll_cfg = mouse_cfg.get("scroll", {}) or {}
+    scroll_enabled = bool(scroll_cfg.get("enabled", True))
+    scroll_hand_token = scroll_cfg.get("hand", "RIGHT")
+    scroll_side = resolve_side(scroll_hand_token, hands)
+    if scroll_side not in ("RIGHT", "LEFT"):
+        scroll_side = "RIGHT"
+    scroll_gesture = str(scroll_cfg.get("gesture", "FIST")).upper()
+    scroll_landmark = int(scroll_cfg.get("landmark", WRIST))
+    scroll_speed = float(scroll_cfg.get("speed", 1200.0))
+    scroll_deadzone = float(scroll_cfg.get("deadzone", 0.01))
+    scroll_interval_ms = int(scroll_cfg.get("interval_ms", 30))
+    scroll_label = binding_notation({"hand": scroll_side, "gesture": scroll_gesture}, dominant_side, support_side)
     mouse_active_hint = mouse_cfg.get("active_hint")
     if not mouse_active_hint:
         trig_label = trigger_label(mode_triggers["mouse"], dominant_side, support_side)
         pointer_hint = binding_notation({"hand": pointer_side, "gesture": "PINCH"}, dominant_side, support_side)
         base_hint = f"CURSOR: {pointer_hint} | LMB: {mouse_left_label} | RMB: {mouse_right_label}"
+        if scroll_enabled:
+            base_hint = f"{base_hint} | SCROLL: {scroll_label}"
         mouse_active_hint = f"{trig_label} | {base_hint}" if trig_label else base_hint
 
     mouse_prev = None
     mouse_left_down = False
     mouse_right_down = False
+    scroll_prev_y = None
+    scroll_last_ms = 0
 
     seq_active = False
     seq_buffer = []
@@ -1377,6 +1393,27 @@ def main():
                 if mouse_right_down:
                     mouse_release("right")
                     mouse_right_down = False
+            scroll_source = right if scroll_side == "RIGHT" else left
+            scroll_state = gR if scroll_side == "RIGHT" else gL
+            scroll_active = bool(
+                scroll_enabled
+                and scroll_source
+                and scroll_state.pose_flags.get(scroll_gesture, False)
+            )
+            if scroll_active:
+                tip = scroll_source["lm"][scroll_landmark]
+                if scroll_prev_y is None:
+                    scroll_prev_y = tip[1]
+                else:
+                    dy = tip[1] - scroll_prev_y
+                    if abs(dy) >= scroll_deadzone and (now_ms - scroll_last_ms) >= scroll_interval_ms:
+                        delta = int(-dy * scroll_speed)
+                        if delta != 0:
+                            mouse_scroll(delta)
+                            scroll_last_ms = now_ms
+                        scroll_prev_y = tip[1]
+            else:
+                scroll_prev_y = None
 
         seq_hand = seq_input_side if seq_input_side in ("RIGHT", "LEFT") else ("RIGHT" if dominant_is_right else "LEFT")
         seq_last_label = last_R_label if seq_hand == "RIGHT" else last_L_label

@@ -82,7 +82,16 @@
             "height": 0.5
         },
         "left_click_binding": "NON_DOMINANT-PINCH",
-        "right_click_binding": "NON_DOMINANT-PINCH_MIDDLE"
+        "right_click_binding": "NON_DOMINANT-PINCH_MIDDLE",
+        "scroll": {
+            "enabled": true,
+            "hand": "RIGHT",
+            "gesture": "FIST",
+            "landmark": 0,
+            "speed": 1200,
+            "deadzone": 0.01,
+            "interval_ms": 30
+        }
     },
     "__comment_controls": "--------HIGH-LEVEL CONTROL GESTURES (SEQUENCE / CONFIRM / UNDO / COMMIT)---------",
     "controls": {

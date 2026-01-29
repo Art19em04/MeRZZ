@@ -20,6 +20,7 @@ MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_ABSOLUTE = 0x8000
 MOUSEEVENTF_VIRTUALDESK = 0x4000
 MAPVK_VK_TO_VSC = 0
@@ -156,3 +157,8 @@ def mouse_release(button="left"):
     else:
         raise ValueError(f"Unsupported mouse button: {button}")
     _send_inputs([_mouse_input(flags=flags)], delay=0.0)
+
+
+def mouse_scroll(delta):
+    """Scroll mouse wheel by a signed delta (positive=up, negative=down)."""
+    _send_inputs([_mouse_input(data=int(delta), flags=MOUSEEVENTF_WHEEL)], delay=0.0)
