@@ -1,171 +1,171 @@
 {
-    "__comment_detector": "-------DETECTOR SETTINGS---------",
-    "detector": {
-        "min_detection_confidence": 0.6,
-        "min_tracking_confidence": 0.5,
-        "max_num_hands": 2,
-        "model_complexity": 1
-    },
-    "__comment_video": "--------CAMERA SETTINGS---------",
-    "video": {
-        "camera_index": 0,
-        "width": 1280,
-        "height": 720,
-        "mirror": true,
-        "show_fps": true
-    },
-    "__comment_hands": "--------HAND ROLES / SIDES---------",
-    "hands": {
-        "dominant": "RIGHT",
-        "support": "LEFT"
-    },
-    "__comment_gesture_engine": "--------LOW-LEVEL GESTURE ENGINE---------",
-    "gesture_engine": {
-        "clutch": "none",
-        "cooldown_ms": 420,
-        "pinch_threshold": 0.051455004647776054,
-        "middle_pinch_threshold": 0.051455004647776054,
-        "fist_threshold": 0.6986375075570722,
-        "thumbs_up_thumb_max_flex": 0.2664826115396578,
-        "thumbs_up_others_min_flex": 0.5934635993628441,
-        "open_palm_max_flex": 0.1,
-        "swipe_window_ms": 320,
-        "swipe_min_dx": 0.02,
-        "swipe_min_speed": 0.15,
-        "swipe_max_dy_ratio": 1.5,
-        "per_gesture_min_ms": {
-            "SWIPE_LEFT": 650,
-            "SWIPE_RIGHT": 650
-        }
-    },
-    "__comment_calibration": "--------AUTO CALIBRATION SETTINGS---------",
-    "calibration": {
-        "enabled": true,
-        "duration_ms": 12000,
-        "trigger_key": "c"
-    },
-    "__comment_sequence": "--------SEQUENCE RECORDING ENGINE---------",
-    "sequence": {
-        "arm_delay_ms": 420,
-        "refractory_ms": 1100,
-        "no_repeat_ms": 650,
-        "cancel_on_hand_exit_ms": 900,
-        "auto_exit_on_hand_exit": false,
-        "max_len": 6,
-        "exit_on_commit": false
-    },
-    "__comment_sounds": "--------SOUNDS / FEEDBACK---------",
-    "sounds": {
-        "on_toggle": false,
-        "on_commit": false,
-        "on_send": false
-    },
-    "__comment_one_hand_mode": "--------ONE-HAND MODE CONFIG---------",
-    "one_hand_mode": {
-        "enabled": true,
-        "status_label": "ONE-HAND",
-        "active_hint": "",
-        "dispatch_hand": "dominant"
-    },
-    "__comment_mouse_control": "--------MOUSE CONTROL MODE---------",
-    "mouse_control": {
-        "enabled": true,
-        "status_label": "MOUSE",
-        "active_hint": "NON_DOMINANT-THUMBS_UP | CURSOR: DOMINANT-PINCH | LMB: DOMINANT-FIST | RMB: DOMINANT-OPEN_PALM",
-        "smoothing_alpha": 0.4,
-        "pointer_hand": "dominant",
-        "pointer_landmark": 8,
-        "control_rect": {
-            "x": 0.45,
-            "y": 0.3,
-            "width": 0.5,
-            "height": 0.5
-        },
-        "left_click_binding": "NON_DOMINANT-PINCH",
-        "right_click_binding": "NON_DOMINANT-PINCH_MIDDLE",
-        "scroll": {
-            "enabled": true,
-            "hand": "RIGHT",
-            "gesture": "FIST",
-            "landmark": 0,
-            "speed": 1200,
-            "deadzone": 0.01,
-            "interval_ms": 30
-        }
-    },
-    "__comment_controls": "--------HIGH-LEVEL CONTROL GESTURES (SEQUENCE / CONFIRM / UNDO / COMMIT)---------",
-    "controls": {
-        "sequence": {
-            "input_hand": "dominant",
-            "candidate_ignore": [],
-            "confirm": {
-                "binding": "NON_DOMINANT-PINCH",
-                "dwell_ms": 220,
-                "refractory_ms": 700
-            },
-            "undo": {
-                "binding": "NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST",
-                "window_ms": 900
-            },
-            "commit": {
-                "binding": "BOTH-FIST",
-                "dwell_ms": 260,
-                "refractory_ms": 1200,
-                "exit_on_commit": false
-            }
-        }
-    },
-    "__comment_ui": "--------USER INTERFACE / SHORTCUTS---------",
-    "ui": {
-        "controls_panel": {
-            "enabled": false,
-            "start_scenario_shortcut": "s",
-            "end_scenario_shortcut": "e"
-        },
-        "hand_windows": {
-            "enabled": true,
-            "size": 220,
-            "padding": 0.2,
-            "margin_px": 16,
-            "show_full_camera": false
-        }
-    },
-    "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
-    "command_mappings": {
-        "functional": {
-            "refractory_ms": 200,
-            "exit_hold_ms": 500,
-            "BOTH-THUMBS_UP": "MODE_ONE_HAND",
-            "BOTH-FIST": "MODE_RECORD",
-            "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
-            "BOTH-OPEN_PALM": "MODE_EXIT"
-        },
-        "complex_gestures": {
-            "DOMINANT-FIST > DOMINANT-FIST": "CTRL+SHIFT+N"
-        },
-        "single_gestures": {
-            "NON_DOMINANT-PINCH": "CTRL+C",
-            "NON_DOMINANT-FIST": "CTRL+V",
-            "DOMINANT-SWIPE_LEFT": "ALT+SHIFT+TAB",
-            "DOMINANT-SWIPE_RIGHT": "ALT+TAB"
-        }
-    },
-    "__comment_eval_single": "--------EVAL SINGLE GESTURE MODE---------",
-    "eval_single": {
-        "gestures": [
-            "PINCH",
-            "PINCH_MIDDLE",
-            "FIST",
-            "THUMBS_UP",
-            "OPEN_PALM",
-            "SWIPE_RIGHT",
-            "SWIPE_LEFT"
-        ],
-        "hand": "dominant",
-        "condition": "ideal",
-        "reps": 30,
-        "timeout_ms": 2500,
-        "pass_accuracy": 0.9,
-        "pass_wrong_max": 3
+  "__comment_detector": "-------DETECTOR SETTINGS---------",
+  "detector": {
+    "min_detection_confidence": 0.6,
+    "min_tracking_confidence": 0.5,
+    "max_num_hands": 2,
+    "model_complexity": 1
+  },
+  "__comment_video": "--------CAMERA SETTINGS---------",
+  "video": {
+    "camera_index": 0,
+    "width": 640,
+    "height": 360,
+    "mirror": true,
+    "show_fps": true
+  },
+  "__comment_hands": "--------HAND ROLES / SIDES---------",
+  "hands": {
+    "dominant": "RIGHT",
+    "support": "LEFT"
+  },
+  "__comment_gesture_engine": "--------LOW-LEVEL GESTURE ENGINE---------",
+  "gesture_engine": {
+    "clutch": "none",
+    "cooldown_ms": 420,
+    "pinch_threshold": 0.051455004647776054,
+    "middle_pinch_threshold": 0.051455004647776054,
+    "fist_threshold": 0.6986375075570722,
+    "thumbs_up_thumb_max_flex": 0.2664826115396578,
+    "thumbs_up_others_min_flex": 0.5934635993628441,
+    "open_palm_max_flex": 0.1,
+    "swipe_window_ms": 320,
+    "swipe_min_dx": 0.02,
+    "swipe_min_speed": 0.15,
+    "swipe_max_dy_ratio": 1.5,
+    "per_gesture_min_ms": {
+      "SWIPE_LEFT": 650,
+      "SWIPE_RIGHT": 650
     }
+  },
+  "__comment_calibration": "--------AUTO CALIBRATION SETTINGS---------",
+  "calibration": {
+    "enabled": true,
+    "duration_ms": 12000,
+    "trigger_key": "c"
+  },
+  "__comment_sequence": "--------SEQUENCE RECORDING ENGINE---------",
+  "sequence": {
+    "arm_delay_ms": 420,
+    "refractory_ms": 1100,
+    "no_repeat_ms": 650,
+    "cancel_on_hand_exit_ms": 900,
+    "auto_exit_on_hand_exit": false,
+    "max_len": 6,
+    "exit_on_commit": false
+  },
+  "__comment_sounds": "--------SOUNDS / FEEDBACK---------",
+  "sounds": {
+    "on_toggle": false,
+    "on_commit": false,
+    "on_send": false
+  },
+  "__comment_one_hand_mode": "--------ONE-HAND MODE CONFIG---------",
+  "one_hand_mode": {
+    "enabled": true,
+    "status_label": "ONE-HAND",
+    "active_hint": "",
+    "dispatch_hand": "DOMINANT"
+  },
+  "__comment_mouse_control": "--------MOUSE CONTROL MODE---------",
+  "mouse_control": {
+    "enabled": true,
+    "status_label": "MOUSE",
+    "active_hint": "NON_DOMINANT-THUMBS_UP | CURSOR: DOMINANT-PINCH | LMB: DOMINANT-FIST | RMB: DOMINANT-OPEN_PALM",
+    "smoothing_alpha": 0.4,
+    "pointer_hand": "DOMINANT",
+    "pointer_landmark": 8,
+    "control_rect": {
+      "x": 0.45,
+      "y": 0.3,
+      "width": 0.5,
+      "height": 0.5
+    },
+    "left_click_binding": "NON_DOMINANT-PINCH",
+    "right_click_binding": "NON_DOMINANT-PINCH_MIDDLE",
+    "scroll": {
+      "enabled": true,
+      "hand": "RIGHT",
+      "gesture": "FIST",
+      "landmark": 0,
+      "speed": 1200,
+      "deadzone": 0.01,
+      "interval_ms": 30
+    }
+  },
+  "__comment_controls": "--------HIGH-LEVEL CONTROL GESTURES (SEQUENCE / CONFIRM / UNDO / COMMIT)---------",
+  "controls": {
+    "sequence": {
+      "input_hand": "DOMINANT",
+      "candidate_ignore": [],
+      "confirm": {
+        "binding": "NON_DOMINANT-PINCH",
+        "dwell_ms": 220,
+        "refractory_ms": 700
+      },
+      "undo": {
+        "binding": "NON_DOMINANT-OPEN_PALM > NON_DOMINANT-FIST",
+        "window_ms": 900
+      },
+      "commit": {
+        "binding": "BOTH-FIST",
+        "dwell_ms": 260,
+        "refractory_ms": 1200,
+        "exit_on_commit": false
+      }
+    }
+  },
+  "__comment_ui": "--------USER INTERFACE / SHORTCUTS---------",
+  "ui": {
+    "controls_panel": {
+      "enabled": false,
+      "start_scenario_shortcut": "s",
+      "end_scenario_shortcut": "e"
+    },
+    "hand_windows": {
+      "enabled": false,
+      "size": 220,
+      "padding": 0.2,
+      "margin_px": 16,
+      "show_full_camera": true
+    }
+  },
+  "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
+  "command_mappings": {
+    "functional": {
+      "refractory_ms": 200,
+      "exit_hold_ms": 500,
+      "BOTH-FIST": "MODE_RECORD",
+      "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
+      "BOTH-THUMBS_UP": "MODE_ONE_HAND",
+      "BOTH-OPEN_PALM": "MODE_EXIT"
+    },
+    "complex_gestures": {
+      "DOMINANT-FIST > DOMINANT-FIST": "CTRL+SHIFT+N"
+    },
+    "single_gestures": {
+      "NON_DOMINANT-PINCH": "CTRL+C",
+      "NON_DOMINANT-FIST": "CTRL+V",
+      "DOMINANT-SWIPE_LEFT": "ALT+SHIFT+TAB",
+      "DOMINANT-SWIPE_RIGHT": "ALT+TAB"
+    }
+  },
+  "__comment_eval_single": "--------EVAL SINGLE GESTURE MODE---------",
+  "eval_single": {
+    "gestures": [
+      "PINCH",
+      "PINCH_MIDDLE",
+      "FIST",
+      "THUMBS_UP",
+      "OPEN_PALM",
+      "SWIPE_RIGHT",
+      "SWIPE_LEFT"
+    ],
+    "hand": "dominant",
+    "condition": "ideal",
+    "reps": 30,
+    "timeout_ms": 2500,
+    "pass_accuracy": 0.9,
+    "pass_wrong_max": 3
+  }
 }

@@ -1,10 +1,16 @@
 """Configuration helpers for GCPC."""
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
-APP_DIR = Path(__file__).resolve().parents[1]
-ROOT = APP_DIR.parent
+_SOURCE_APP_DIR = Path(__file__).resolve().parents[1]
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).resolve().parent
+    APP_DIR = ROOT / "app"
+else:
+    APP_DIR = _SOURCE_APP_DIR
+    ROOT = APP_DIR.parent
 
 
 def load_config(config_path: Path | str | None = None) -> Dict[str, Any]:

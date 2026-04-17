@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 *.pyo
 da/
+GCPC/release/
+GCPC/build/
+GCPC/dist/
+GCPC/logs/
+GCPC/models/
+*.csv

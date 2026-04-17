@@ -1,4 +1,5 @@
 import csv
+import logging
 import statistics
 import time
 import uuid
@@ -21,6 +22,7 @@ from app.gestures import (
 )
 from app.os_events_win import mouse_move_normalized, mouse_press, mouse_release, mouse_scroll, press_combo
 from app.osd import OSD
+from app.settings_dialog import GestureSettingsDialog
 from app.tracker_mediapipe import MediaPipeHandTracker
 from app.utils.bindings import (
     binding_notation,
@@ -35,7 +37,10 @@ from app.utils.bindings import (
 )
 from app.utils.camera import draw_landmarks, open_camera
 from app.utils.config import APP_DIR, build_hands, load_config, resolve_side, save_config
+from app.utils.runtime import install_exception_hooks, report_fatal_exception, setup_logging
 from app.utils.triggers import DebouncedTrigger
+
+LOGGER = logging.getLogger(__name__)
 
 
 METRIC_FIELDS = [
@@ -100,79 +105,116 @@ def _write_eval_report(session_id: str, report_text: str) -> str:
 
 
 class ControlPanel(QtWidgets.QWidget):
-    """Tiny always-on-top widget for interaction mode and armed toggles."""
+    """Always-on-top launcher panel for camera, hand control and settings."""
+    settings_requested = QtCore.Signal()
 
-    def __init__(self):
+    def __init__(
+        self,
+        default_camera_enabled: bool = False,
+        default_hand_enabled: bool = False,
+        default_resolution: tuple[int, int] = (640, 360),
+    ):
         super().__init__(None, QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint)
         self.setWindowTitle("GCPC Controls")
-        self.interaction_mode = "gestures"
-        self.armed = True
-        self.eval_single_active = False
+        self.hand_control_enabled = bool(default_hand_enabled)
+        self.camera_enabled = bool(default_camera_enabled)
 
         layout = QtWidgets.QVBoxLayout(self)
-        self.interaction_btn = QtWidgets.QPushButton(self._interaction_label())
-        self.interaction_btn.clicked.connect(self._toggle_interaction)
-        self.armed_btn = QtWidgets.QPushButton(self._armed_label())
-        self.armed_btn.setCheckable(True)
-        self.armed_btn.setChecked(True)
-        self.armed_btn.clicked.connect(self._toggle_armed)
-        self.eval_btn = QtWidgets.QPushButton(self._eval_label())
-        self.eval_btn.setCheckable(True)
-        self.eval_btn.setChecked(False)
-        self.eval_btn.clicked.connect(self._toggle_eval)
+        self.hand_btn = QtWidgets.QPushButton(self._hand_label())
+        self.hand_btn.setCheckable(True)
+        self.hand_btn.setChecked(self.hand_control_enabled)
+        self.hand_btn.clicked.connect(self._toggle_hand_control)
+        self.camera_btn = QtWidgets.QPushButton(self._camera_label())
+        self.camera_btn.setCheckable(True)
+        self.camera_btn.setChecked(self.camera_enabled)
+        self.camera_btn.clicked.connect(self._toggle_camera)
+        self.camera_resolution_combo = QtWidgets.QComboBox(self)
+        selected_index = 0
+        for index, (text, width, height) in enumerate(self._resolution_options()):
+            self.camera_resolution_combo.addItem(text, (width, height))
+            if (int(width), int(height)) == (int(default_resolution[0]), int(default_resolution[1])):
+                selected_index = index
+        self.camera_resolution_combo.setCurrentIndex(selected_index)
+        self.settings_btn = QtWidgets.QPushButton("Gesture settings")
+        self.settings_btn.clicked.connect(self.settings_requested.emit)
 
-        layout.addWidget(self.interaction_btn)
-        layout.addWidget(self.armed_btn)
-        layout.addWidget(self.eval_btn)
+        camera_row = QtWidgets.QHBoxLayout()
+        camera_row.addWidget(self.camera_btn, 1)
+        camera_row.addWidget(self.camera_resolution_combo, 1)
 
-    def _interaction_label(self):
-        mode = "GESTURES" if self.interaction_mode == "gestures" else "MK"
-        return f"Interaction: {mode}"
+        layout.addWidget(self.hand_btn)
+        layout.addLayout(camera_row)
+        layout.addWidget(self.settings_btn)
 
-    def _toggle_interaction(self):
-        self.interaction_mode = "mk" if self.interaction_mode == "gestures" else "gestures"
-        self.interaction_btn.setText(self._interaction_label())
+    @staticmethod
+    def _resolution_options():
+        return [
+            ("640x360", 640, 360),
+            ("640x480", 640, 480),
+            ("960x540", 960, 540),
+            ("1280x720", 1280, 720),
+            ("1920x1080", 1920, 1080),
+        ]
 
-    def _armed_label(self):
-        return "Armed" if self.armed else "Disarmed"
+    def _hand_label(self):
+        return "Hand control: ON" if self.hand_control_enabled else "Hand control: OFF"
 
-    def _toggle_armed(self):
-        self.armed = self.armed_btn.isChecked()
-        self.armed_btn.setText(self._armed_label())
+    def _camera_label(self):
+        return "Camera: ON" if self.camera_enabled else "Camera: OFF"
 
-    def _eval_label(self):
-        return "EVAL_SINGLE: ON" if self.eval_single_active else "EVAL_SINGLE: OFF"
+    def _toggle_hand_control(self):
+        self.hand_control_enabled = self.hand_btn.isChecked()
+        self.hand_btn.setText(self._hand_label())
 
-    def _toggle_eval(self):
-        self.eval_single_active = self.eval_btn.isChecked()
-        self.eval_btn.setText(self._eval_label())
+    def _toggle_camera(self):
+        self.camera_enabled = self.camera_btn.isChecked()
+        self.camera_btn.setText(self._camera_label())
 
     def current_interaction(self) -> str:
-        return self.interaction_mode
+        return "gestures"
 
     def is_armed(self) -> bool:
-        return self.armed
+        return True
 
     def is_eval_single(self) -> bool:
-        return self.eval_single_active
+        return False
 
     def set_eval_single(self, active: bool) -> None:
-        self.eval_single_active = active
-        self.eval_btn.setChecked(active)
-        self.eval_btn.setText(self._eval_label())
+        return
+
+    def is_hand_control_enabled(self) -> bool:
+        return self.hand_control_enabled
+
+    def is_camera_enabled(self) -> bool:
+        return self.camera_enabled
+
+    def selected_camera_resolution(self) -> tuple[int, int]:
+        data = self.camera_resolution_combo.currentData()
+        if isinstance(data, tuple) and len(data) == 2:
+            return int(data[0]), int(data[1])
+        return 640, 360
 
 
 def main():
     cfg = load_config()
+    LOGGER.info("Starting GCPC application")
+    measurements_enabled = bool((cfg.get("measurements") or {}).get("enabled", False))
     app = QtWidgets.QApplication([])
     osd = OSD()
     osd.show()
 
     ui_cfg = cfg.get("ui", {})
     panel_cfg = ui_cfg.get("controls_panel", {})
-    panel_enabled = bool(panel_cfg.get("enabled", True))
+    panel_enabled = True
     start_scenario_key = str(panel_cfg.get("start_scenario_shortcut", "Alt+S"))
     end_scenario_key = str(panel_cfg.get("end_scenario_shortcut", "Alt+E"))
+    settings_shortcut_key = str(panel_cfg.get("settings_shortcut", "Ctrl+,"))
+    vcfg = cfg.get("video", {})
+    idx = int(vcfg.get("camera_index", 0))
+    w = int(vcfg.get("width", 1280))
+    h = int(vcfg.get("height", 720))
+    mirror = bool(vcfg.get("mirror", True))
+    show_fps = bool(vcfg.get("show_fps", False))
     hand_windows_cfg = ui_cfg.get("hand_windows", {})
     hand_windows_enabled = bool(hand_windows_cfg.get("enabled", False))
     hand_window_size = int(hand_windows_cfg.get("size", 220))
@@ -180,9 +222,49 @@ def main():
     hand_window_margin = int(hand_windows_cfg.get("margin_px", 16))
     show_full_camera = bool(hand_windows_cfg.get("show_full_camera", True))
 
-    panel = ControlPanel() if panel_enabled else None
+    panel = (
+        ControlPanel(
+            default_camera_enabled=bool(panel_cfg.get("camera_enabled", False)),
+            default_hand_enabled=bool(panel_cfg.get("hand_control_enabled", False)),
+            default_resolution=(w, h),
+        )
+        if panel_enabled
+        else None
+    )
     if panel:
         panel.show()
+    calibration_requested_from_ui = False
+
+    def _open_settings():
+        nonlocal calibration_requested_from_ui
+        dialog_parent = panel if panel else osd
+
+        def _request_calibration():
+            nonlocal calibration_requested_from_ui
+            calibration_requested_from_ui = True
+
+        try:
+            dialog = GestureSettingsDialog(
+                cfg,
+                dialog_parent,
+                on_request_calibration=_request_calibration,
+            )
+            if dialog.exec() != QtWidgets.QDialog.Accepted:
+                return
+            save_config(cfg)
+            LOGGER.info("Gesture settings saved to config.json")
+            QtWidgets.QMessageBox.information(
+                dialog_parent,
+                "Settings saved",
+                "Gesture settings were saved to config.json.\nRestart GCPC to apply all runtime changes.",
+            )
+        except Exception:
+            LOGGER.exception("Failed to save gesture settings")
+            QtWidgets.QMessageBox.critical(
+                dialog_parent,
+                "Settings error",
+                "Could not save gesture settings. Check logs/gcpc.log for details.",
+            )
 
     session_id = uuid.uuid4().hex
     latencies: List[float] = []
@@ -307,13 +389,6 @@ def main():
         )
         cv2.imshow(title, tile)
 
-    vcfg = cfg["video"]
-    idx = int(vcfg.get("camera_index", 0))
-    w = int(vcfg.get("width", 1280))
-    h = int(vcfg.get("height", 720))
-    mirror = bool(vcfg.get("mirror", True))
-    show_fps = bool(vcfg.get("show_fps", False))
-
     calib_cfg = cfg.get("calibration", {})
     calibration_enabled = bool(calib_cfg.get("enabled", True))
     calibration_duration_ms = int(calib_cfg.get("duration_ms", 12000))
@@ -363,29 +438,38 @@ def main():
     eval_pass_accuracy = float(eval_cfg.get("pass_accuracy", 0.9))
     eval_pass_wrong_max = int(eval_cfg.get("pass_wrong_max", 3))
 
-    cap = open_camera(idx, w, h)
-    if cap is None:
-        raise RuntimeError(f"[DEVICE] unable to open camera (index={idx})")
-
     dcfg = cfg.get("detector", {})
+    handedness_cfg = dcfg.get("handedness") or {}
+    handedness_strategy = str(handedness_cfg.get("strategy", "auto")).strip().lower()
+    if handedness_strategy not in {"auto", "label", "geometry"}:
+        handedness_strategy = "auto"
+    swap_handedness_labels = bool(handedness_cfg.get("swap_labels", False))
+    prefer_geometry_on_conflict = bool(
+        handedness_cfg.get("prefer_geometry_on_conflict", True)
+    )
     tracker = MediaPipeHandTracker(
         min_det=dcfg.get("min_detection_confidence"),
         min_trk=dcfg.get("min_tracking_confidence"),
         max_hands=dcfg.get("max_num_hands"),
         model_complexity=dcfg.get("model_complexity"),
     )
+    cap = None
+    camera_runtime_enabled = False
+    active_resolution = (w, h)
+    camera_error = ""
 
     providers = getattr(tracker, "providers", []) or []
     backend_kind = "gpu" if any("CUDA" in p.upper() or "GPU" in p.upper() for p in providers) else "cpu"
     providers_str = str(providers)
     print(f"[SESSION] id={session_id} backend={backend_kind} providers={providers}")
-    _append_metrics_row(
-        {
-            "session_id": session_id,
-            "backend": backend_kind,
-            "providers": providers_str,
-        }
-    )
+    if measurements_enabled:
+        _append_metrics_row(
+            {
+                "session_id": session_id,
+                "backend": backend_kind,
+                "providers": providers_str,
+            }
+        )
 
     def _session_summary_row(final_ns: int | None = None) -> Dict[str, str | float]:
         """Prepare a metrics row describing session-level performance."""
@@ -402,6 +486,48 @@ def main():
             "e2e_p50": round(e2e_p50, 3) if e2e_p50 is not None else "",
             "e2e_p95": round(e2e_p95, 3) if e2e_p95 is not None else "",
         }
+
+    def _normalize_handedness_label(raw_label: object) -> str:
+        token = str(raw_label or "").strip().upper()
+        if token in {"RIGHT", "R", "RH"}:
+            return "Right"
+        if token in {"LEFT", "L", "LH"}:
+            return "Left"
+        return ""
+
+    def _swap_handedness_label(label: str) -> str:
+        if label == "Right":
+            return "Left"
+        if label == "Left":
+            return "Right"
+        return label
+
+    def _infer_side_from_geometry(lm) -> str:
+        if not lm or len(lm) <= max(THUMB_TIP, PINKY_MCP):
+            return "Right"
+        thumb_x = float(lm[THUMB_TIP][0])
+        pinky_x = float(lm[PINKY_MCP][0])
+        # For mirrored frames, right hand typically has thumb on the right side.
+        if mirror:
+            return "Right" if thumb_x > pinky_x else "Left"
+        return "Right" if thumb_x < pinky_x else "Left"
+
+    def _resolved_hand_label(hand_obj: dict) -> str:
+        geometry_label = _infer_side_from_geometry(hand_obj.get("lm"))
+        reported_label = _normalize_handedness_label(hand_obj.get("label"))
+        if swap_handedness_labels and reported_label:
+            reported_label = _swap_handedness_label(reported_label)
+
+        if handedness_strategy == "geometry":
+            return geometry_label
+        if handedness_strategy == "label":
+            return reported_label or geometry_label
+
+        # auto: trust model label when consistent, otherwise use geometry.
+        if reported_label and geometry_label and reported_label != geometry_label:
+            if prefer_geometry_on_conflict:
+                return geometry_label
+        return reported_label or geometry_label
 
     def _start_scenario():
         nonlocal scenario_active, scenario_name, scenario_start_ns, scenario_false_baseline, scenario_interaction
@@ -439,18 +565,19 @@ def main():
         elapsed_ms = (now_ns - (scenario_start_ns or now_ns)) / 1e6
         task_success = int(choice)
         false_in_scenario = false_activations_total - scenario_false_baseline
-        _append_metrics_row(
-            {
-                "session_id": session_id,
-                "backend": backend_kind,
-                "providers": providers_str,
-                "interaction": scenario_interaction,
-                "scenario": scenario_name,
-                "task_time_ms": round(elapsed_ms, 3),
-                "task_success": task_success,
-                "false_activations": false_in_scenario,
-            }
-        )
+        if measurements_enabled:
+            _append_metrics_row(
+                {
+                    "session_id": session_id,
+                    "backend": backend_kind,
+                    "providers": providers_str,
+                    "interaction": scenario_interaction,
+                    "scenario": scenario_name,
+                    "task_time_ms": round(elapsed_ms, 3),
+                    "task_success": task_success,
+                    "false_activations": false_in_scenario,
+                }
+            )
         scenario_active = False
         scenario_start_ns = None
         print(
@@ -463,21 +590,43 @@ def main():
         if eval_active:
             return
         now_ns = time.perf_counter_ns()
-        if last_frame_capture_ns is not None:
+        if measurements_enabled and last_frame_capture_ns is not None:
             latencies.append((now_ns - last_frame_capture_ns) / 1e6)
         armed = _armed_state()
         active = scenario_active
-        if not (active and armed):
+        if measurements_enabled and not (active and armed):
             false_activations_total += 1
         press_combo(combo)
 
     shortcut_parent = panel if panel else osd
-    start_shortcut = QtGui.QShortcut(QtGui.QKeySequence(start_scenario_key), shortcut_parent)
-    start_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
-    start_shortcut.activated.connect(_start_scenario)
-    end_shortcut = QtGui.QShortcut(QtGui.QKeySequence(end_scenario_key), shortcut_parent)
-    end_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
-    end_shortcut.activated.connect(_end_scenario)
+    if measurements_enabled:
+        start_shortcut = QtGui.QShortcut(QtGui.QKeySequence(start_scenario_key), shortcut_parent)
+        start_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
+        start_shortcut.activated.connect(_start_scenario)
+        end_shortcut = QtGui.QShortcut(QtGui.QKeySequence(end_scenario_key), shortcut_parent)
+        end_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
+        end_shortcut.activated.connect(_end_scenario)
+    settings_shortcut = QtGui.QShortcut(QtGui.QKeySequence(settings_shortcut_key), shortcut_parent)
+    settings_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
+    settings_shortcut.activated.connect(_open_settings)
+    if panel:
+        panel.settings_requested.connect(_open_settings)
+
+    def _safe_destroy_window(title: str) -> None:
+        try:
+            cv2.destroyWindow(title)
+        except Exception:
+            pass
+
+    def _close_camera() -> None:
+        nonlocal cap, camera_runtime_enabled
+        if cap is not None:
+            cap.release()
+            cap = None
+        camera_runtime_enabled = False
+        _safe_destroy_window("GCPC - Camera")
+        _safe_destroy_window("GCPC - Left Hand")
+        _safe_destroy_window("GCPC - Right Hand")
 
     gR = GestureState(cfg["gesture_engine"])
     gL = GestureState(cfg["gesture_engine"])
@@ -1070,6 +1219,10 @@ def main():
 
         if new_mode == prev and not force_reset:
             return
+        if new_mode == prev and force_reset and new_mode == "idle":
+            # Avoid noisy repeated idle resets when we are already fully idle.
+            if not seq_active and not one_hand_active and not mouse_active and not calibration_active:
+                return
 
         # --- sequence ---
         if prev == "record" or force_reset:
@@ -1132,12 +1285,63 @@ def main():
     fps = None
     last_frame_time = time.time()
     hand_windows_placed = False
+    hand_control_prev = panel.is_hand_control_enabled() if panel else True
+    camera_requested_prev = panel.is_camera_enabled() if panel else True
 
     while True:
         QtWidgets.QApplication.processEvents()
+        if panel and not panel.isVisible():
+            break
+
+        camera_requested = panel.is_camera_enabled() if panel else True
+        requested_resolution = panel.selected_camera_resolution() if panel else (w, h)
+        requested_resolution = (int(requested_resolution[0]), int(requested_resolution[1]))
+
+        if camera_requested and requested_resolution != active_resolution:
+            _close_camera()
+            active_resolution = requested_resolution
+            hand_windows_placed = False
+
+        if camera_requested and cap is None:
+            cap = open_camera(idx, requested_resolution[0], requested_resolution[1])
+            if cap is None:
+                camera_error = (
+                    f"Unable to open camera index={idx} "
+                    f"at {requested_resolution[0]}x{requested_resolution[1]}"
+                )
+                osd.set_text("CAMERA ERROR", camera_error)
+                QtCore.QThread.msleep(120)
+                continue
+            camera_runtime_enabled = True
+            active_resolution = requested_resolution
+            w, h = active_resolution
+            camera_error = ""
+            hand_windows_placed = False
+
+        if not camera_requested:
+            if camera_requested_prev:
+                switch_mode("idle", int(time.time() * 1000), force_reset=True)
+                _close_camera()
+            camera_requested_prev = False
+            osd.set_text("CAMERA OFF", "Enable camera in GCPC Controls")
+            QtCore.QThread.msleep(80)
+            continue
+        camera_requested_prev = True
+
+        if cap is None:
+            osd.set_text("CAMERA OFF", camera_error or "Camera is not initialized")
+            QtCore.QThread.msleep(80)
+            continue
+
         ret, frame = cap.read()
         if not ret:
-            break
+            camera_error = "Camera read failed. Trying to reopen..."
+            switch_mode("idle", int(time.time() * 1000), force_reset=True)
+            _close_camera()
+            osd.set_text("CAMERA ERROR", camera_error)
+            QtCore.QThread.msleep(120)
+            continue
+
         if mirror:
             frame = cv2.flip(frame, 1)
         frame_capture_ns = time.perf_counter_ns()
@@ -1148,6 +1352,57 @@ def main():
         dt = now - last_frame_time
         last_frame_time = now
         now_ms = int(now * 1000)
+        hand_control_enabled = panel.is_hand_control_enabled() if panel else True
+        if hand_control_prev and not hand_control_enabled:
+            switch_mode("idle", now_ms, force_reset=True)
+        hand_control_prev = hand_control_enabled
+
+        if calibration_requested_from_ui:
+            if hand_control_enabled:
+                switch_mode("calibrate", now_ms, force_reset=True)
+                calibration_requested_from_ui = False
+            else:
+                osd.set_text("CALIBRATION WAIT", "Enable hand control first.")
+
+        if not hand_control_enabled:
+            if show_fps and dt > 0:
+                inst = 1.0 / dt
+                fps = inst if fps is None else (0.9 * fps + 0.1 * inst)
+            status_txt = "HAND CONTROL: OFF"
+            cv2.putText(
+                frame,
+                status_txt,
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 200, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            if show_fps and fps is not None:
+                cv2.putText(
+                    frame,
+                    f"FPS: {fps:5.1f}",
+                    (10, 58),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                    cv2.LINE_AA,
+                )
+            osd.set_text("IDLE", "Enable hand control in GCPC Controls")
+            if not hand_windows_enabled or show_full_camera:
+                cv2.imshow("GCPC - Camera", frame)
+            else:
+                _safe_destroy_window("GCPC - Camera")
+            _safe_destroy_window("GCPC - Left Hand")
+            _safe_destroy_window("GCPC - Right Hand")
+            raw_key = cv2.waitKey(1)
+            key = raw_key & 0xFF if raw_key != -1 else -1
+            if raw_key == 27 or key == 27:
+                break
+            continue
+
         finished_calibration = False
         if calibration_active:
             finished_calibration = _advance_calibration_stage(now_ms)
@@ -1161,6 +1416,8 @@ def main():
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         hands = tracker.process(rgb)
+        for hnd in hands:
+            hnd["label"] = _resolved_hand_label(hnd)
 
         right = left = None
         rights = []
@@ -1177,7 +1434,7 @@ def main():
                 rights = [srt[1]]
             elif len(srt) == 1:
                 lm = srt[0]["lm"]
-                lbl = "Right" if lm[4][0] > lm[20][0] else "Left"
+                lbl = _infer_side_from_geometry(lm)
                 if lbl == "Right":
                     rights = [srt[0]]
                 else:
@@ -1220,7 +1477,7 @@ def main():
         dom_event = evR if dominant_side == "RIGHT" else evL
         support_event = evR if support_side == "RIGHT" else evL
 
-        eval_requested = panel.is_eval_single() if panel else False
+        eval_requested = measurements_enabled and (panel.is_eval_single() if panel else False)
         if eval_requested and not eval_active:
             _start_eval(now_ms)
         elif not eval_requested and eval_active:
@@ -1608,7 +1865,6 @@ def main():
                 hand_windows_placed = True
         if not hand_windows_enabled or show_full_camera:
             cv2.imshow("GCPC - Camera", frame)
-            cv2.setWindowProperty("GCPC - Camera", cv2.WND_PROP_TOPMOST, 1)
         raw_key = cv2.waitKey(1)
         key = raw_key & 0xFF if raw_key != -1 else -1
         if raw_key == 27 or key == 27:
@@ -1621,10 +1877,18 @@ def main():
             if key_chr == calibration_trigger_key:
                 switch_mode("calibrate", now_ms, force_reset=True)
 
-    _append_metrics_row(_session_summary_row())
-    cap.release()
+    if measurements_enabled:
+        _append_metrics_row(_session_summary_row())
+    if cap is not None:
+        cap.release()
     cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-    main()
+    setup_logging()
+    install_exception_hooks()
+    try:
+        main()
+    except Exception:
+        report_fatal_exception(context="Fatal error in GCPC main loop")
+        raise SystemExit(1)
