@@ -69,14 +69,8 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1 -PythonExe "C:\Users\Artyom
 
 | PINCH_MIDDLE | THUMBS_UP | SWIPE_LEFT / SWIPE_RIGHT |
 |---|---|---|
-| ![PINCH_MIDDLE](GCPC/docs/gestures/pinch_middle.png) | ![THUMBS_UP](GCPC/docs/gestures/thumbs_up.png) | ![SWIPE](GCPC/docs/gestures/swipe_combo.png) |
+| ![PINCH_MIDDLE](GCPC/docs/gestures/pinch_middle.png) | ![THUMBS_UP](GCPC/docs/gestures/thumbs_up.png) | IN_PROGRESS
 
-
-Или крупными карточками:
-
-![OPEN_PALM](GCPC/docs/gestures/open_palm.png)
-![FIST](GCPC/docs/gestures/fist.png)
-![PINCH](GCPC/docs/gestures/pinch.png)
 
 ## Где смотреть логи
 
