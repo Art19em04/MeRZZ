@@ -122,7 +122,6 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         self._build_mouse_group(content_layout)
         self._build_keymap_group(content_layout)
         self._build_calibration_group(content_layout)
-        self._build_one_hand_group(content_layout)
 
         note = QtWidgets.QLabel(
             "Saved to config.json. Restart GCPC to apply all runtime changes."
@@ -426,16 +425,6 @@ class GestureSettingsDialog(QtWidgets.QDialog):
             "Calibration is unavailable in current runtime context.",
         )
 
-    def _build_one_hand_group(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
-        group = QtWidgets.QGroupBox("One-hand mode", self)
-        form = QtWidgets.QFormLayout(group)
-
-        one_hand_cfg = self.cfg.get("one_hand_mode") or {}
-        dispatch = _normalized_token(one_hand_cfg.get("dispatch_hand"), "DOMINANT")
-        self.dispatch_hand_combo = self._make_combo(DISPATCH_OPTIONS, dispatch)
-        form.addRow("Dispatch hand", self.dispatch_hand_combo)
-        parent_layout.addWidget(group)
-
     def _combo_value(self, combo: QtWidgets.QComboBox, fallback: str) -> str:
         value = combo.currentData()
         return _normalized_token(value, fallback)
@@ -529,7 +518,7 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         rect_cfg["height"] = float(self.mouse_rect_height_spin.value())
 
         one_hand_cfg = self.cfg.setdefault("one_hand_mode", {})
-        one_hand_cfg["dispatch_hand"] = self._combo_value(self.dispatch_hand_combo, "DOMINANT")
+        one_hand_cfg.pop("dispatch_hand", None)
 
         ui_cfg = self.cfg.setdefault("ui", {})
         hand_windows_cfg = ui_cfg.setdefault("hand_windows", {})

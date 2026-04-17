@@ -8,3 +8,4 @@ GCPC/dist/
 GCPC/logs/
 GCPC/models/
 *.csv
+GCPC/*.csv

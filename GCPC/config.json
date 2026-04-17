@@ -9,8 +9,8 @@
   "__comment_video": "--------CAMERA SETTINGS---------",
   "video": {
     "camera_index": 0,
-    "width": 640,
-    "height": 360,
+    "width": 1280,
+    "height": 720,
     "mirror": true,
     "show_fps": true
   },
@@ -64,8 +64,7 @@
   "one_hand_mode": {
     "enabled": true,
     "status_label": "ONE-HAND",
-    "active_hint": "",
-    "dispatch_hand": "DOMINANT"
+    "active_hint": ""
   },
   "__comment_mouse_control": "--------MOUSE CONTROL MODE---------",
   "mouse_control": {
@@ -108,7 +107,7 @@
         "window_ms": 900
       },
       "commit": {
-        "binding": "BOTH-FIST",
+        "binding": "BOTH-THUMBS_UP",
         "dwell_ms": 260,
         "refractory_ms": 1200,
         "exit_on_commit": false
@@ -123,11 +122,11 @@
       "end_scenario_shortcut": "e"
     },
     "hand_windows": {
-      "enabled": false,
+      "enabled": true,
       "size": 220,
       "padding": 0.2,
       "margin_px": 16,
-      "show_full_camera": true
+      "show_full_camera": false
     }
   },
   "__comment_command_mappings": "--------GESTURE -> PC ACTION / HOTKEY MAPPINGS---------",
@@ -135,9 +134,9 @@
     "functional": {
       "refractory_ms": 200,
       "exit_hold_ms": 500,
-      "BOTH-FIST": "MODE_RECORD",
+      "BOTH-PINCH": "MODE_RECORD",
       "NON_DOMINANT-THUMBS_UP": "MODE_MOUSE",
-      "BOTH-THUMBS_UP": "MODE_ONE_HAND",
+      "NON_DOMINANT-PINCH_MIDDLE": "MODE_ONE_HAND",
       "BOTH-OPEN_PALM": "MODE_EXIT"
     },
     "complex_gestures": {
