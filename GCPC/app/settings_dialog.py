@@ -15,6 +15,13 @@ HAND_OPTIONS = (
     ("EITHER", "Either"),
 )
 
+SINGLE_HAND_OPTIONS = (
+    ("DOMINANT", "Dominant"),
+    ("NON_DOMINANT", "Non-dominant"),
+    ("RIGHT", "Right"),
+    ("LEFT", "Left"),
+)
+
 SIDE_OPTIONS = (
     ("RIGHT", "Right"),
     ("LEFT", "Left"),
@@ -28,6 +35,14 @@ GESTURE_OPTIONS = (
     ("OPEN_PALM", "OPEN_PALM"),
     ("SWIPE_RIGHT", "SWIPE_RIGHT"),
     ("SWIPE_LEFT", "SWIPE_LEFT"),
+)
+
+POSE_GESTURE_OPTIONS = (
+    ("PINCH", "PINCH"),
+    ("PINCH_MIDDLE", "PINCH_MIDDLE"),
+    ("FIST", "FIST"),
+    ("THUMBS_UP", "THUMBS_UP"),
+    ("OPEN_PALM", "OPEN_PALM"),
 )
 
 DISPATCH_OPTIONS = (
@@ -79,6 +94,13 @@ def _parse_sequence_binding(
 
 def _compose_single_binding(hand: str, gesture: str) -> str:
     return f"{hand}-{gesture}"
+
+
+def _coerce_int(value: Any, fallback: int) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _get_mode_binding(functional_cfg: Dict[str, Any], mode_name: str, fallback: Tuple[str, str]) -> Tuple[str, str]:
@@ -162,10 +184,11 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         hand: str,
         gesture: str,
         hand_options: Iterable[Tuple[str, str]] = HAND_OPTIONS,
+        gesture_options: Iterable[Tuple[str, str]] = GESTURE_OPTIONS,
     ) -> Tuple[QtWidgets.QComboBox, QtWidgets.QComboBox]:
         row = QtWidgets.QHBoxLayout()
         hand_combo = self._make_combo(hand_options, hand)
-        gesture_combo = self._make_combo(GESTURE_OPTIONS, gesture)
+        gesture_combo = self._make_combo(gesture_options, gesture)
         row.addWidget(hand_combo, 1)
         row.addWidget(gesture_combo, 1)
 
@@ -296,6 +319,9 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         mouse_cfg = self.cfg.get("mouse_control") or {}
         pointer_hand = _normalized_token(mouse_cfg.get("pointer_hand"), "DOMINANT")
         rect_cfg = mouse_cfg.get("control_rect") or {}
+        scroll_cfg = mouse_cfg.get("scroll") or {}
+        scroll_hand = _normalized_token(scroll_cfg.get("hand"), "RIGHT")
+        scroll_gesture = _normalized_token(scroll_cfg.get("gesture"), "FIST")
         left_hand, left_gesture = _parse_single_binding(
             mouse_cfg.get("left_click_binding"),
             "NON_DOMINANT",
@@ -315,6 +341,21 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         self.mouse_right_hand_combo, self.mouse_right_gesture_combo = self._add_binding_row(
             form, "Right click", right_hand, right_gesture
         )
+        self.scroll_hand_combo, self.scroll_gesture_combo = self._add_binding_row(
+            form,
+            "Scroll gesture",
+            scroll_hand,
+            scroll_gesture,
+            hand_options=SINGLE_HAND_OPTIONS,
+            gesture_options=POSE_GESTURE_OPTIONS,
+        )
+        self.scroll_speed_spin = self._make_spin(
+            _coerce_int(scroll_cfg.get("speed", 1200), 1200),
+            0,
+            10000,
+            50,
+        )
+        form.addRow("Scroll speed", self.scroll_speed_spin)
         self.mouse_rect_width_spin = QtWidgets.QDoubleSpinBox(self)
         self.mouse_rect_width_spin.setRange(0.1, 1.0)
         self.mouse_rect_width_spin.setSingleStep(0.05)
@@ -516,6 +557,10 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         rect_cfg = mouse_cfg.setdefault("control_rect", {})
         rect_cfg["width"] = float(self.mouse_rect_width_spin.value())
         rect_cfg["height"] = float(self.mouse_rect_height_spin.value())
+        scroll_cfg = mouse_cfg.setdefault("scroll", {})
+        scroll_cfg["hand"] = self._combo_value(self.scroll_hand_combo, "RIGHT")
+        scroll_cfg["gesture"] = self._combo_value(self.scroll_gesture_combo, "FIST")
+        scroll_cfg["speed"] = int(self.scroll_speed_spin.value())
 
         one_hand_cfg = self.cfg.setdefault("one_hand_mode", {})
         one_hand_cfg.pop("dispatch_hand", None)

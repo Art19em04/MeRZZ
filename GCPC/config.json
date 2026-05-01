@@ -12,7 +12,8 @@
     "width": 1280,
     "height": 720,
     "mirror": true,
-    "show_fps": true
+    "show_fps": true,
+    "last_working_camera_index": 0
   },
   "__comment_hands": "--------HAND ROLES / SIDES---------",
   "hands": {
@@ -87,7 +88,7 @@
       "hand": "RIGHT",
       "gesture": "FIST",
       "landmark": 0,
-      "speed": 1200,
+      "speed": 3200,
       "deadzone": 0.01,
       "interval_ms": 30
     }

@@ -58,6 +58,13 @@ def _percentile(values: List[float], fraction: float) -> float | None:
     return sorted_values[index]
 
 
+def _optional_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _binding_active(
     binding: dict | None,
     dominant_side: str,
@@ -129,6 +136,7 @@ def main():
 
     vcfg = cfg.get("video", {})
     idx = int(vcfg.get("camera_index", 0))
+    last_working_camera_idx = _optional_int(vcfg.get("last_working_camera_index"))
     w = int(vcfg.get("width", 1280))
     h = int(vcfg.get("height", 720))
     mirror = bool(vcfg.get("mirror", True))
@@ -169,6 +177,18 @@ def main():
         video_cfg["height"] = height
         save_config(cfg)
         LOGGER.info("Camera resolution saved: %sx%s", width, height)
+
+    def _persist_last_camera_index(camera_idx: int | None) -> None:
+        nonlocal last_working_camera_idx
+        if camera_idx is None or camera_idx < 0:
+            return
+        if last_working_camera_idx == camera_idx:
+            return
+        video_cfg = cfg.setdefault("video", {})
+        video_cfg["last_working_camera_index"] = camera_idx
+        last_working_camera_idx = camera_idx
+        save_config(cfg)
+        LOGGER.info("Last working camera index saved: %s", camera_idx)
 
     def _open_settings():
         nonlocal calibration_requested_from_ui
@@ -682,7 +702,12 @@ def main():
             hand_windows_placed = False
 
         if camera_requested and cap is None:
-            cap = open_camera(idx, requested_resolution[0], requested_resolution[1])
+            cap, opened_camera_idx = open_camera(
+                idx,
+                requested_resolution[0],
+                requested_resolution[1],
+                preferred_idx=last_working_camera_idx,
+            )
             if cap is None:
                 camera_error = (
                     f"Unable to open camera index={idx} "
@@ -691,6 +716,7 @@ def main():
                 osd.set_text("CAMERA ERROR", camera_error)
                 QtCore.QThread.msleep(120)
                 continue
+            _persist_last_camera_index(opened_camera_idx)
             active_resolution = requested_resolution
             w, h = active_resolution
             camera_error = ""
