@@ -1,0 +1,17 @@
+GESTURE TEST REPORT
+session_id: 3637b38bc5e64c22ac203955190ca2bc
+datetime: 2026-05-02T13:16:57
+test_name: gesture_test
+condition: ideal
+hand: dominant
+attempts: 210
+hits: 105
+wrongs: 104
+misses: 0
+
+Per-gesture summary:
+- PINCH: attempts=30, hits=13, wrongs=17, misses=0, accuracy=0.433, avg_ms=445.583
+- PINCH_MIDDLE: attempts=30, hits=10, wrongs=14, misses=0, accuracy=0.333, avg_ms=486.667
+- FIST: attempts=30, hits=24, wrongs=6, misses=0, accuracy=0.8, avg_ms=439.846
+- THUMBS_UP: attempts=30, hits=25, wrongs=5, misses=0, accuracy=0.833, avg_ms=456.0
+- OPEN_PALM: attempts=30, hits=29, wrongs=1, misses=0, accuracy=0.967, avg_ms=444.759

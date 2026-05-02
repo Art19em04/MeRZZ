@@ -123,6 +123,7 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.cfg = cfg
         self._on_request_calibration = on_request_calibration
+        self.requested_action: str | None = None
         self.setWindowTitle("GCPC Gesture Settings")
         self.resize(720, 700)
 
@@ -144,6 +145,7 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         self._build_mouse_group(content_layout)
         self._build_keymap_group(content_layout)
         self._build_calibration_group(content_layout)
+        self._build_developer_group(content_layout)
 
         note = QtWidgets.QLabel(
             "Saved to config.json and applied to the running session where possible."
@@ -451,6 +453,89 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         row.addStretch(1)
         parent_layout.addWidget(group)
 
+    def _build_developer_group(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
+        group = QtWidgets.QGroupBox("Developer mode", self)
+        layout = QtWidgets.QVBoxLayout(group)
+
+        ui_cfg = self.cfg.get("ui") or {}
+        evaluation_cfg = self.cfg.get("evaluation") or {}
+        gesture_eval_cfg = dict(self.cfg.get("eval_single") or {})
+        gesture_eval_cfg.update(evaluation_cfg.get("gesture_test") or {})
+
+        self.developer_mode_checkbox = QtWidgets.QCheckBox(
+            "Enable developer mode",
+            self,
+        )
+        self.developer_mode_checkbox.setChecked(bool(ui_cfg.get("developer_mode", False)))
+        layout.addWidget(self.developer_mode_checkbox)
+
+        self.developer_tools_widget = QtWidgets.QWidget(self)
+        tools_layout = QtWidgets.QVBoxLayout(self.developer_tools_widget)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+
+        gesture_group = QtWidgets.QGroupBox("Gesture test", self)
+        gesture_form = QtWidgets.QFormLayout(gesture_group)
+        self.gesture_test_name_edit = QtWidgets.QLineEdit(
+            str(gesture_eval_cfg.get("test_name", "gesture_test") or "gesture_test"),
+            self,
+        )
+        self.gesture_condition_edit = QtWidgets.QLineEdit(
+            str(gesture_eval_cfg.get("condition", "") or ""),
+            self,
+        )
+        self.gesture_reps_spin = self._make_spin(gesture_eval_cfg.get("reps", 10), 1, 500, 1)
+        self.gesture_timeout_spin = self._make_spin(
+            gesture_eval_cfg.get("timeout_ms", 2500),
+            100,
+            30000,
+            100,
+        )
+        self.gesture_hand_combo = self._make_combo(
+            SINGLE_HAND_OPTIONS,
+            _normalized_token(gesture_eval_cfg.get("hand"), "DOMINANT"),
+        )
+        gesture_form.addRow("Test name", self.gesture_test_name_edit)
+        gesture_form.addRow("Condition", self.gesture_condition_edit)
+        gesture_form.addRow("Repetitions per gesture", self.gesture_reps_spin)
+        gesture_form.addRow("Timeout per attempt (ms)", self.gesture_timeout_spin)
+        gesture_form.addRow("Hand", self.gesture_hand_combo)
+        self.gesture_test_btn = QtWidgets.QPushButton("Gesture test", self)
+        self.gesture_test_btn.clicked.connect(
+            lambda: self._request_test_action("gesture_test")
+        )
+        gesture_form.addRow("", self.gesture_test_btn)
+        tools_layout.addWidget(gesture_group)
+
+        scenario_group = QtWidgets.QGroupBox("Scenario test ", self)
+        scenario_layout = QtWidgets.QHBoxLayout(scenario_group)
+        self.scenario_test_btn = QtWidgets.QPushButton(
+            "Scenario test",
+            self,
+        )
+        self.scenario_test_btn.clicked.connect(
+            lambda: self._request_test_action("scenario_test")
+        )
+        scenario_layout.addWidget(self.scenario_test_btn)
+        scenario_layout.addStretch(1)
+        tools_layout.addWidget(scenario_group)
+
+        layout.addWidget(self.developer_tools_widget)
+        self.developer_mode_checkbox.toggled.connect(self._set_developer_tools_visible)
+        self._set_developer_tools_visible(self.developer_mode_checkbox.isChecked())
+        parent_layout.addWidget(group)
+
+    def _set_developer_tools_visible(self, visible: bool) -> None:
+        self.developer_tools_widget.setVisible(bool(visible))
+
+    def _request_test_action(self, action: str) -> None:
+        try:
+            self._save_to_config()
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Validation error", str(exc))
+            return
+        self.requested_action = action
+        super().accept()
+
     def _request_calibration(self) -> None:
         if callable(self._on_request_calibration):
             self._on_request_calibration()
@@ -566,10 +651,41 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         one_hand_cfg.pop("dispatch_hand", None)
 
         ui_cfg = self.cfg.setdefault("ui", {})
+        ui_cfg["developer_mode"] = bool(self.developer_mode_checkbox.isChecked())
         hand_windows_cfg = ui_cfg.setdefault("hand_windows", {})
         hands_only = bool(self.hands_only_camera_checkbox.isChecked())
         hand_windows_cfg["enabled"] = hands_only
         hand_windows_cfg["show_full_camera"] = not hands_only
+
+        evaluation_cfg = self.cfg.setdefault("evaluation", {})
+        gesture_eval_cfg = evaluation_cfg.setdefault("gesture_test", {})
+        gesture_eval_cfg["test_name"] = self.gesture_test_name_edit.text().strip() or "gesture_test"
+        gesture_eval_cfg["condition"] = self.gesture_condition_edit.text().strip()
+        gesture_eval_cfg["reps"] = int(self.gesture_reps_spin.value())
+        gesture_eval_cfg["timeout_ms"] = int(self.gesture_timeout_spin.value())
+        gesture_eval_cfg["hand"] = self._combo_value(self.gesture_hand_combo, "DOMINANT")
+        gesture_eval_cfg.setdefault(
+            "gestures",
+            [
+                "PINCH",
+                "PINCH_MIDDLE",
+                "FIST",
+                "THUMBS_UP",
+                "OPEN_PALM",
+                "SWIPE_RIGHT",
+                "SWIPE_LEFT",
+            ],
+        )
+        scenario_eval_cfg = evaluation_cfg.setdefault("scenario_test", {})
+        scenario_eval_cfg.setdefault("default_name", "")
+        scenario_eval_cfg.setdefault(
+            "scenarios",
+            [
+                "copy_paste",
+                "window_switch",
+                "mouse_navigation",
+            ],
+        )
 
     def accept(self) -> None:
         try:

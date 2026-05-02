@@ -20,7 +20,7 @@ from app.os_events_win import (
 from app.osd import OSD
 from app.services.calibration import CalibrationSession
 from app.services.csv_metrics import append_metrics_row
-from app.services.eval_single import EvalSingleSession
+from app.services.eval_manager import GestureEvalSession, ScenarioEvalDialog
 from app.services.handedness import HandednessResolver
 from app.services.one_hand import OneHandCommandDispatcher
 from app.services.rendering import (
@@ -204,6 +204,9 @@ def main():
         panel.show()
 
     calibration_requested_from_ui = False
+    gesture_eval_requested_from_ui = False
+    scenario_eval_requested_from_ui = False
+    scenario_eval_dialog: ScenarioEvalDialog | None = None
 
     def _persist_camera_resolution(width: int, height: int) -> None:
         width = int(width)
@@ -234,6 +237,7 @@ def main():
 
     def _open_settings():
         nonlocal calibration_requested_from_ui
+        nonlocal gesture_eval_requested_from_ui, scenario_eval_requested_from_ui
         dialog_parent = panel if panel else osd
         previous_cfg = copy.deepcopy(cfg)
 
@@ -249,17 +253,25 @@ def main():
             )
             if dialog.exec() != QtWidgets.QDialog.Accepted:
                 return
+            requested_action = dialog.requested_action
             restart_notes = _apply_runtime_settings(int(time.time() * 1000))
             save_config(cfg)
             LOGGER.info("Gesture settings saved to config.json and applied live")
-            message = "Gesture settings were saved and applied immediately."
-            if restart_notes:
-                message += "\nRestart GCPC to apply: " + ", ".join(restart_notes)
-            QtWidgets.QMessageBox.information(
-                dialog_parent,
-                "Settings saved",
-                message,
-            )
+            if requested_action == "gesture_test":
+                gesture_eval_requested_from_ui = True
+                osd.set_text("GESTURE TEST", "Enable hand control; the test will start automatically.")
+            elif requested_action == "scenario_test":
+                scenario_eval_requested_from_ui = True
+                osd.set_text("SCENARIO TEST", "Scenario test window will open.")
+            else:
+                message = "Gesture settings were saved and applied immediately."
+                if restart_notes:
+                    message += "\nRestart GCPC to apply: " + ", ".join(restart_notes)
+                QtWidgets.QMessageBox.information(
+                    dialog_parent,
+                    "Settings saved",
+                    message,
+                )
         except Exception:
             cfg.clear()
             cfg.update(previous_cfg)
@@ -369,7 +381,7 @@ def main():
     support_side = hands["support"]
     dominant_is_right = dominant_side == "RIGHT"
 
-    eval_session = EvalSingleSession(cfg, hands, panel=panel)
+    eval_session = GestureEvalSession(cfg, hands)
     calibration = CalibrationSession(cfg)
 
     def _start_scenario():
@@ -998,7 +1010,7 @@ def main():
         if eval_session.active:
             eval_session.reconfigure_hands(cfg, hands)
         else:
-            eval_session = EvalSingleSession(cfg, hands, panel=panel)
+            eval_session = GestureEvalSession(cfg, hands)
 
         gR.cfg = cfg.get("gesture_engine", {}) or {}
         gL.cfg = cfg.get("gesture_engine", {}) or {}
@@ -1114,6 +1126,15 @@ def main():
         if panel and not panel.isVisible():
             break
 
+        if scenario_eval_requested_from_ui:
+            dialog_parent = panel if panel else osd
+            if scenario_eval_dialog is None or not scenario_eval_dialog.isVisible():
+                scenario_eval_dialog = ScenarioEvalDialog(cfg, dialog_parent)
+            scenario_eval_dialog.show()
+            scenario_eval_dialog.raise_()
+            scenario_eval_dialog.activateWindow()
+            scenario_eval_requested_from_ui = False
+
         camera_requested = panel.is_camera_enabled() if panel else True
         requested_resolution = panel.selected_camera_resolution() if panel else (w, h)
         requested_resolution = (int(requested_resolution[0]), int(requested_resolution[1]))
@@ -1150,7 +1171,13 @@ def main():
                 switch_mode("idle", int(time.time() * 1000), force_reset=True)
                 _close_camera()
             camera_requested_prev = False
-            osd.set_text("CAMERA OFF", "Enable camera in GCPC Controls")
+            if gesture_eval_requested_from_ui:
+                osd.set_text(
+                    "GESTURE TEST WAIT",
+                    "Enable camera and hand control in GCPC Controls",
+                )
+            else:
+                osd.set_text("CAMERA OFF", "Enable camera in GCPC Controls")
             QtCore.QThread.msleep(80)
             continue
         camera_requested_prev = True
@@ -1185,6 +1212,11 @@ def main():
             switch_mode("idle", now_ms, force_reset=True)
         hand_control_prev = hand_control_enabled
 
+        if gesture_eval_requested_from_ui and hand_control_enabled:
+            if eval_session.start(now_ms):
+                switch_mode("idle", now_ms, force_reset=True)
+            gesture_eval_requested_from_ui = False
+
         if calibration_requested_from_ui:
             if hand_control_enabled:
                 switch_mode("calibrate", now_ms, force_reset=True)
@@ -1217,7 +1249,14 @@ def main():
                     2,
                     cv2.LINE_AA,
                 )
-            osd.set_text("IDLE", "Enable hand control in GCPC Controls")
+            if gesture_eval_requested_from_ui:
+                osd.set_text("GESTURE TEST WAIT", "Enable hand control in GCPC Controls")
+            else:
+                notice = eval_session.notice_text(now_ms)
+                if notice:
+                    osd.set_text(*notice)
+                else:
+                    osd.set_text("IDLE", "Enable hand control in GCPC Controls")
             if not hand_windows_enabled or show_full_camera:
                 cv2.imshow("GCPC - Camera", frame)
             else:
@@ -1303,13 +1342,6 @@ def main():
 
         dom_event = evR if dominant_side == "RIGHT" else evL
         support_event = evR if support_side == "RIGHT" else evL
-
-        eval_requested = measurements_enabled and (panel.is_eval_single() if panel else False)
-        if eval_requested and not eval_session.active:
-            if eval_session.start(now_ms, session_id):
-                switch_mode("idle", now_ms, force_reset=True)
-        elif not eval_requested and eval_session.active:
-            eval_session.stop()
 
         def _trigger_fired(trigger: dict | None) -> bool:
             nonlocal both_pose_latched
@@ -1590,8 +1622,11 @@ def main():
             eval_event = evR if eval_session.hand_setting == "RIGHT" else evL
             eval_session.process(now_ms, eval_event)
 
+        eval_notice = eval_session.notice_text(now_ms)
         if eval_session.active:
             top, sub = eval_session.status_text()
+        elif eval_notice:
+            top, sub = eval_notice
         elif calibration.active:
             top, sub = calibration.status_text(now_ms)
         elif seq_active:

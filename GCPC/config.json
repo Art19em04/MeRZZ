@@ -117,6 +117,7 @@
   },
   "__comment_ui": "--------USER INTERFACE / SHORTCUTS---------",
   "ui": {
+    "developer_mode": true,
     "controls_panel": {
       "enabled": false,
       "start_scenario_shortcut": "s",
@@ -150,7 +151,36 @@
       "DOMINANT-SWIPE_RIGHT": "ALT+TAB"
     }
   },
-  "__comment_eval_single": "--------EVAL SINGLE GESTURE MODE---------",
+  "__comment_evaluation": "--------HIDDEN DEVELOPER EVALUATION TOOLS---------",
+  "evaluation": {
+    "gesture_test": {
+      "test_name": "gesture_test",
+      "condition": "ideal",
+      "gestures": [
+        "PINCH",
+        "PINCH_MIDDLE",
+        "FIST",
+        "THUMBS_UP",
+        "OPEN_PALM",
+        "SWIPE_RIGHT",
+        "SWIPE_LEFT"
+      ],
+      "hand": "DOMINANT",
+      "reps": 30,
+      "timeout_ms": 2500,
+      "pass_accuracy": 0.9,
+      "pass_wrong_max": 3
+    },
+    "scenario_test": {
+      "default_name": "",
+      "scenarios": [
+        "copy_paste",
+        "window_switch",
+        "mouse_navigation"
+      ]
+    }
+  },
+  "__comment_eval_single": "--------DEPRECATED FALLBACK FOR OLDER CONFIGS---------",
   "eval_single": {
     "gestures": [
       "PINCH",

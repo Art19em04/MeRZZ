@@ -94,12 +94,6 @@ class ControlPanel(QtWidgets.QWidget):
     def is_armed(self) -> bool:
         return True
 
-    def is_eval_single(self) -> bool:
-        return False
-
-    def set_eval_single(self, active: bool) -> None:
-        _ = active
-
     def is_hand_control_enabled(self) -> bool:
         return self.hand_control_enabled
 

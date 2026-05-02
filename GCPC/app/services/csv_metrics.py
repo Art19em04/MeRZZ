@@ -23,16 +23,38 @@ METRIC_FIELDS = [
 EVAL_FIELDS = [
     "session_id",
     "datetime",
+    "test_name",
     "condition",
-    "hand",
-    "gesture_target",
-    "reps",
+    "expected_gesture",
+    "detected_gesture",
+    "attempt_index",
+    "result",
+    "time_to_recognize_ms",
+]
+
+GESTURE_SUMMARY_FIELDS = [
+    "session_id",
+    "datetime",
+    "test_name",
+    "condition",
+    "gesture",
+    "attempts",
     "hits",
     "wrongs",
     "misses",
     "accuracy",
-    "false_rate",
-    "avg_time_to_hit_ms",
+    "avg_time_to_recognize_ms",
+]
+
+SCENARIO_EVAL_FIELDS = [
+    "session_id",
+    "datetime",
+    "scenario_name",
+    "duration_ms",
+    "success",
+    "error_count",
+    "critical_error_count",
+    "comment",
 ]
 
 
@@ -55,8 +77,18 @@ def append_metrics_row(row: Dict[str, object]) -> None:
 
 
 def append_eval_row(row: Dict[str, object]) -> None:
-    """Persist a single eval row to ``gesture_eval.csv``."""
+    """Persist a single gesture-attempt eval row to ``gesture_eval.csv``."""
     append_csv_row("gesture_eval.csv", EVAL_FIELDS, row)
+
+
+def append_gesture_summary_row(row: Dict[str, object]) -> None:
+    """Persist a per-gesture eval summary row."""
+    append_csv_row("gesture_eval_summary.csv", GESTURE_SUMMARY_FIELDS, row)
+
+
+def append_scenario_eval_row(row: Dict[str, object]) -> None:
+    """Persist a single applied-scenario eval row."""
+    append_csv_row("scenario_eval.csv", SCENARIO_EVAL_FIELDS, row)
 
 
 def write_eval_report(session_id: str, report_text: str) -> str:
