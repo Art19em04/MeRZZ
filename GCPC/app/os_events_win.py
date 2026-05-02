@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 import ctypes
+import logging
 import time
 from ctypes import wintypes
+
+LOGGER = logging.getLogger(__name__)
 
 if not hasattr(wintypes, "ULONG_PTR"): wintypes.ULONG_PTR = wintypes.WPARAM
 ULONG_PTR = wintypes.ULONG_PTR;
@@ -82,7 +85,14 @@ def _send_inputs(ins, delay=0.02):
     if not ins:
         return
     arr = (INPUT * len(ins))(*ins)
-    SendInput(len(ins), arr, ctypes.sizeof(INPUT))
+    sent = SendInput(len(ins), arr, ctypes.sizeof(INPUT))
+    if sent != len(ins):
+        LOGGER.warning(
+            "SendInput sent %s/%s events; last_error=%s",
+            sent,
+            len(ins),
+            ctypes.GetLastError(),
+        )
     if delay:
         time.sleep(delay)
 

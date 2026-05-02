@@ -92,8 +92,7 @@ def binding_from_string(raw_binding: str, hands: Dict[str, str]) -> Tuple[str, L
     if not parsed:
         raise ValueError("[GESTURE] failed to parse binding")
     side, gestures = parsed
-    if not gestures:
-        raise ValueError("[GESTURE] no gestures parsed from binding")
+    assert gestures, "parse_mapping_key returned an empty gesture list"
     return side, gestures
 
 
@@ -135,8 +134,10 @@ def binding_notation(binding: Mapping[str, Any], dominant_side: str, support_sid
     return f"{token}-{gesture}"
 
 
-def trigger_label(trig: Mapping[str, Any], dominant_side: str, support_side: str) -> str:
+def trigger_label(trig: Mapping[str, Any] | None, dominant_side: str, support_side: str) -> str:
     """Format human readable label for trigger binding."""
+    if not trig:
+        return ""
     gesture = trig.get("gesture", "")
     if not gesture:
         return ""
@@ -163,8 +164,7 @@ def build_single_map(raw_map: Mapping[str, str], hands: Dict[str, str]) -> Dict[
         if not parsed:
             raise ValueError("[GESTURE] invalid single mapping")
         side, gestures = parsed
-        if not gestures:
-            raise ValueError("[GESTURE] empty single mapping")
+        assert gestures, "parse_mapping_key returned an empty gesture list"
         bucket = single_map.setdefault(side, {})
         bucket[gestures[0]] = combo
     return single_map
@@ -178,8 +178,7 @@ def build_sequence_map(raw_map: Mapping[str, str], hands: Dict[str, str]) -> Dic
         if not parsed:
             raise ValueError("[GESTURE] invalid complex mapping")
         side, gestures = parsed
-        if not gestures:
-            raise ValueError("[GESTURE] empty complex mapping")
+        assert gestures, "parse_mapping_key returned an empty gesture list"
         bucket = seq_map.setdefault(side, {})
         bucket[tuple(gestures)] = combo
     return seq_map

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import csv
+import logging
 from typing import Dict, Iterable
 
 from app.utils.config import APP_DIR
+
+LOGGER = logging.getLogger(__name__)
 
 METRIC_FIELDS = [
     "session_id",
@@ -64,11 +67,15 @@ def append_csv_row(file_name: str, field_names: Iterable[str], row: Dict[str, ob
     path = APP_DIR.parent / file_name
     path.parent.mkdir(parents=True, exist_ok=True)
     exists = path.exists()
-    with path.open("a", encoding="utf-8", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=fields)
-        if not exists:
-            writer.writeheader()
-        writer.writerow({key: row.get(key, "") for key in fields})
+    try:
+        with path.open("a", encoding="utf-8", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=fields)
+            if not exists:
+                writer.writeheader()
+            writer.writerow({key: row.get(key, "") for key in fields})
+    except (OSError, csv.Error):
+        LOGGER.exception("Failed to append CSV row to %s", path)
+        raise
 
 
 def append_metrics_row(row: Dict[str, object]) -> None:
@@ -95,7 +102,11 @@ def write_eval_report(session_id: str, report_text: str) -> str:
     """Write evaluation report to a text file and return its path."""
     path = APP_DIR.parent / f"gesture_eval_report_{session_id}.txt"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as file:
-        file.write(report_text)
+    try:
+        with path.open("w", encoding="utf-8") as file:
+            file.write(report_text)
+    except OSError:
+        LOGGER.exception("Failed to write evaluation report to %s", path)
+        raise
     return str(path)
 

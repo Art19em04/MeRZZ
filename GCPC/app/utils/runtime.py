@@ -83,6 +83,9 @@ def _show_error_dialog(title: str, message: str, details: str) -> None:
         if owns_app:
             app.quit()
     except Exception:
+        logging.getLogger(LOGGER_NAME).exception(
+            "Failed to show Qt error dialog; falling back to console output"
+        )
         print(title)
         print(message)
         if details:

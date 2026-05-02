@@ -4,12 +4,13 @@ import logging
 import statistics
 import time
 import uuid
-from typing import Any, Dict, List, Mapping
+from typing import Dict, List
 
 import cv2
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from app.gestures import GestureState, WRIST
+from app.gestures import GestureState
+from app.modes import binding_active, build_mode_triggers, trigger_fired
 from app.os_events_win import (
     mouse_move_normalized,
     mouse_press,
@@ -22,6 +23,7 @@ from app.services.calibration import CalibrationSession
 from app.services.csv_metrics import append_metrics_row
 from app.services.eval_manager import GestureEvalSession, ScenarioEvalDialog
 from app.services.handedness import HandednessResolver
+from app.services.mouse_control import build_mouse_control_settings
 from app.services.one_hand import OneHandCommandDispatcher
 from app.services.rendering import (
     active_pose_name,
@@ -33,15 +35,12 @@ from app.settings_dialog import GestureSettingsDialog
 from app.tracker_mediapipe import MediaPipeHandTracker
 from app.ui.control_panel import ControlPanel
 from app.utils.bindings import (
-    binding_notation,
     build_sequence_map,
     build_single_map,
     lookup_mapping,
     merge_single_into_sequences,
-    parse_mapping_key,
     parse_sequence_binding,
     parse_single_binding,
-    trigger_label,
 )
 from app.utils.camera import draw_landmarks, open_camera
 from app.utils.config import build_hands, load_config, resolve_side, save_config
@@ -64,99 +63,6 @@ def _optional_int(value) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _binding_active(
-    binding: dict | None,
-    dominant_side: str,
-    support_side: str,
-    g_right: GestureState,
-    g_left: GestureState,
-    right_present: bool,
-    left_present: bool,
-    event_right: str,
-    event_left: str,
-) -> bool:
-    """Check whether gesture binding is satisfied given hand presence and events."""
-    if not binding:
-        return False
-    gesture = str(binding.get("gesture") or "").upper()
-    if not gesture:
-        return False
-    hand = str(binding.get("hand") or "").upper()
-
-    def _side_active(side_name: str) -> bool:
-        if side_name == "RIGHT":
-            if not right_present:
-                return False
-            state = g_right
-            event = event_right
-        elif side_name == "LEFT":
-            if not left_present:
-                return False
-            state = g_left
-            event = event_left
-        else:
-            return False
-        flag = state.pose_flags.get(gesture)
-        if flag:
-            return True
-        return event == gesture
-
-    if hand == "BOTH":
-        return _side_active("RIGHT") and _side_active("LEFT")
-    if hand in ("ANY", "EITHER"):
-        return _side_active("RIGHT") or _side_active("LEFT")
-    if hand == "RIGHT":
-        return _side_active("RIGHT")
-    if hand == "LEFT":
-        return _side_active("LEFT")
-    if hand == dominant_side:
-        return _side_active(dominant_side)
-    if hand == support_side:
-        return _side_active(support_side)
-    return False
-
-
-def _clamp_rect(x: float, y: float, w_rect: float, h_rect: float):
-    x = max(0.0, min(1.0, x))
-    y = max(0.0, min(1.0, y))
-    w_rect = max(1e-4, min(1.0 - x, w_rect))
-    h_rect = max(1e-4, min(1.0 - y, h_rect))
-    return {"x": x, "y": y, "w": w_rect, "h": h_rect}
-
-
-def _build_mode_triggers(
-    functional_raw: Mapping[str, Any],
-    hands: Mapping[str, str],
-) -> tuple[int, int, Dict[str, dict | None]]:
-    mode_refractory_ms = int(functional_raw.get("refractory_ms", 800))
-    exit_hold_ms = int(functional_raw.get("exit_hold_ms", 500))
-    mode_triggers: Dict[str, dict | None] = {}
-
-    for raw_key, combo in functional_raw.items():
-        if not isinstance(combo, str) or not combo.startswith("MODE_"):
-            continue
-        parsed = parse_mapping_key(raw_key, dict(hands))
-        if not parsed:
-            raise ValueError(f"[GESTURE] bad functional mapping key: {raw_key!r}")
-        side, gestures = parsed
-        if not gestures:
-            raise ValueError(f"[GESTURE] empty gestures for key: {raw_key!r}")
-        binding = {"hand": side, "gesture": gestures[0]}
-        if combo == "MODE_ONE_HAND":
-            mode_triggers["one_hand"] = binding
-        elif combo == "MODE_RECORD":
-            mode_triggers["record"] = binding
-        elif combo == "MODE_MOUSE":
-            mode_triggers["mouse"] = binding
-        elif combo == "MODE_EXIT":
-            mode_triggers["exit"] = binding
-        elif combo == "MODE_CALIBRATE":
-            mode_triggers["calibrate"] = binding
-
-    mode_triggers.setdefault("calibrate", None)
-    return mode_refractory_ms, exit_hold_ms, mode_triggers
 
 
 def main():
@@ -472,8 +378,12 @@ def main():
     def _safe_destroy_window(title: str) -> None:
         try:
             cv2.destroyWindow(title)
-        except Exception:
-            pass
+        except cv2.error:
+            LOGGER.debug(
+                "Ignoring OpenCV destroyWindow failure for %s; window may not exist",
+                title,
+                exc_info=True,
+            )
 
     cap = None
     active_resolution = (w, h)
@@ -541,7 +451,7 @@ def main():
     single_map_raw = cmd_map.get("single_gestures") or {}
     complex_map_raw = cmd_map.get("complex_gestures") or {}
     functional_raw = cmd_map.get("functional") or {}
-    mode_refractory_ms, exit_hold_ms, mode_triggers = _build_mode_triggers(
+    mode_refractory_ms, exit_hold_ms, mode_triggers = build_mode_triggers(
         functional_raw,
         hands,
     )
@@ -570,71 +480,32 @@ def main():
         one_active_hint = f"{action_hint} | {exit_hint}" if exit_hint else action_hint
 
     mouse_cfg = cfg.get("mouse_control", {})
-    mouse_enabled = bool(mouse_cfg.get("enabled", False))
-    mouse_status_label = str(mouse_cfg.get("status_label", "MOUSE"))
-    mouse_smooth = max(0.0, min(1.0, float(mouse_cfg.get("smoothing_alpha", 0.25))))
-    pointer_hand_token = mouse_cfg.get("pointer_hand")
-    pointer_side = resolve_side(pointer_hand_token, hands)
-    if pointer_side not in ("RIGHT", "LEFT"):
-        pointer_side = dominant_side
-    pointer_landmark = int(mouse_cfg.get("pointer_landmark", 8))
-
-    rect_cfg = mouse_cfg.get("control_rect", {}) or {}
-    rect_x = float(rect_cfg.get("x", 0.0) or 0.0)
-    rect_y = float(rect_cfg.get("y", 0.0) or 0.0)
-    rect_w = float(rect_cfg.get("width", 1.0) or 1.0)
-    rect_h = float(rect_cfg.get("height", 1.0) or 1.0)
-    mouse_rect = _clamp_rect(rect_x, rect_y, rect_w, rect_h)
-
-    def _read_mouse_binding(
-        key: str,
-        source_cfg: Mapping[str, Any] | None = None,
-        source_hands: Mapping[str, str] | None = None,
-        source_dominant_side: str | None = None,
-        source_support_side: str | None = None,
-    ):
-        binding_cfg = source_cfg if source_cfg is not None else mouse_cfg
-        binding_hands = dict(source_hands if source_hands is not None else hands)
-        binding_dominant = source_dominant_side or dominant_side
-        binding_support = source_support_side or support_side
-        raw_value = binding_cfg.get(key)
-        binding = parse_single_binding(raw_value, binding_hands)
-        gesture = binding.get("gesture") or ""
-        binding["gesture"] = str(gesture).upper()
-        label = binding_notation(binding, binding_dominant, binding_support)
-        return binding, label
-
-    mouse_left_binding, mouse_left_label = _read_mouse_binding("left_click_binding")
-    mouse_right_binding, mouse_right_label = _read_mouse_binding("right_click_binding")
-
-    scroll_cfg = mouse_cfg.get("scroll", {}) or {}
-    scroll_enabled = bool(scroll_cfg.get("enabled", True))
-    scroll_hand_token = scroll_cfg.get("hand", "RIGHT")
-    scroll_side = resolve_side(scroll_hand_token, hands)
-    if scroll_side not in ("RIGHT", "LEFT"):
-        scroll_side = "RIGHT"
-    scroll_gesture = str(scroll_cfg.get("gesture", "FIST")).upper()
-    scroll_landmark = int(scroll_cfg.get("landmark", WRIST))
-    scroll_speed = float(scroll_cfg.get("speed", 1200.0))
-    scroll_deadzone = float(scroll_cfg.get("deadzone", 0.01))
-    scroll_interval_ms = int(scroll_cfg.get("interval_ms", 30))
-    scroll_label = binding_notation(
-        {"hand": scroll_side, "gesture": scroll_gesture},
+    mouse_settings = build_mouse_control_settings(
+        mouse_cfg,
+        hands,
         dominant_side,
         support_side,
+        mode_triggers.get("mouse"),
     )
-    mouse_active_hint = mouse_cfg.get("active_hint")
-    if not mouse_active_hint:
-        trig_label = trigger_label(mode_triggers.get("mouse"), dominant_side, support_side)
-        pointer_hint = binding_notation(
-            {"hand": pointer_side, "gesture": "PINCH"},
-            dominant_side,
-            support_side,
-        )
-        base_hint = f"CURSOR: {pointer_hint} | LMB: {mouse_left_label} | RMB: {mouse_right_label}"
-        if scroll_enabled:
-            base_hint = f"{base_hint} | SCROLL: {scroll_label}"
-        mouse_active_hint = f"{trig_label} | {base_hint}" if trig_label else base_hint
+    mouse_enabled = mouse_settings.enabled
+    mouse_status_label = mouse_settings.status_label
+    mouse_smooth = mouse_settings.smoothing_alpha
+    pointer_side = mouse_settings.pointer_side
+    pointer_landmark = mouse_settings.pointer_landmark
+    mouse_rect = mouse_settings.rect
+    mouse_left_binding = mouse_settings.left_binding
+    mouse_left_label = mouse_settings.left_label
+    mouse_right_binding = mouse_settings.right_binding
+    mouse_right_label = mouse_settings.right_label
+    scroll_enabled = mouse_settings.scroll_enabled
+    scroll_side = mouse_settings.scroll_side
+    scroll_gesture = mouse_settings.scroll_gesture
+    scroll_landmark = mouse_settings.scroll_landmark
+    scroll_speed = mouse_settings.scroll_speed
+    scroll_deadzone = mouse_settings.scroll_deadzone
+    scroll_interval_ms = mouse_settings.scroll_interval_ms
+    scroll_label = mouse_settings.scroll_label
+    mouse_active_hint = mouse_settings.active_hint
 
     mouse_prev = None
     mouse_left_down = False
@@ -665,9 +536,18 @@ def main():
     both_pose_latched = {}
     exit_hold_since = None
 
+    def _release_mouse_buttons() -> None:
+        nonlocal mouse_left_down, mouse_right_down
+        if mouse_left_down:
+            mouse_release("left")
+            mouse_left_down = False
+        if mouse_right_down:
+            mouse_release("right")
+            mouse_right_down = False
+
     def switch_mode(new_mode: str, now_ms: int, force_reset: bool = False):
         nonlocal current_mode, seq_active, one_hand_active, mouse_active
-        nonlocal mouse_prev, mouse_left_down, mouse_right_down
+        nonlocal mouse_prev
         nonlocal last_single_action, seq_buffer, seq_pending, last_evt_ms, mode_last_change_ms
 
         prev = current_mode
@@ -690,12 +570,7 @@ def main():
             seq_active = False
 
         if prev == "mouse" or force_reset:
-            if mouse_left_down:
-                mouse_release("left")
-                mouse_left_down = False
-            if mouse_right_down:
-                mouse_release("right")
-                mouse_right_down = False
+            _release_mouse_buttons()
         if new_mode == "mouse" and mouse_enabled:
             mouse_prev = None
             mouse_active = True
@@ -736,13 +611,13 @@ def main():
         nonlocal mode_refractory_ms, exit_hold_ms, mode_triggers
         nonlocal single_map, one_hand_dispatcher, seq_map
         nonlocal one_enabled, one_status_label, one_active_hint
-        nonlocal mouse_cfg, mouse_enabled, mouse_status_label, mouse_smooth
+        nonlocal mouse_enabled, mouse_status_label, mouse_smooth
         nonlocal pointer_side, pointer_landmark, mouse_rect
         nonlocal mouse_left_binding, mouse_left_label
         nonlocal mouse_right_binding, mouse_right_label
         nonlocal scroll_enabled, scroll_side, scroll_gesture, scroll_landmark
         nonlocal scroll_speed, scroll_deadzone, scroll_interval_ms, scroll_label
-        nonlocal mouse_active_hint, mouse_prev, mouse_left_down, mouse_right_down
+        nonlocal mouse_active_hint, mouse_prev
         nonlocal scroll_prev_y, scroll_last_ms
         nonlocal seq_buffer, seq_pending, last_seq_event_ms, last_evt_ms, last_sent_ms
         nonlocal undo_open_ts, last_R_label, last_L_label, last_single_action
@@ -850,7 +725,7 @@ def main():
             new_mode_refractory_ms,
             new_exit_hold_ms,
             new_mode_triggers,
-        ) = _build_mode_triggers(new_functional_raw, new_hands)
+        ) = build_mode_triggers(new_functional_raw, new_hands)
         new_single_map = build_single_map(new_single_map_raw, new_hands)
         new_one_hand_dispatcher = OneHandCommandDispatcher(
             new_single_map_raw,
@@ -883,79 +758,32 @@ def main():
             )
 
         new_mouse_cfg = cfg.get("mouse_control", {}) or {}
-        new_mouse_enabled = bool(new_mouse_cfg.get("enabled", False))
-        new_mouse_status_label = str(new_mouse_cfg.get("status_label", "MOUSE"))
-        new_mouse_smooth = max(
-            0.0,
-            min(1.0, float(new_mouse_cfg.get("smoothing_alpha", 0.25))),
-        )
-        new_pointer_side = resolve_side(new_mouse_cfg.get("pointer_hand"), new_hands)
-        if new_pointer_side not in ("RIGHT", "LEFT"):
-            new_pointer_side = new_dominant_side
-        new_pointer_landmark = int(new_mouse_cfg.get("pointer_landmark", 8))
-
-        new_rect_cfg = new_mouse_cfg.get("control_rect", {}) or {}
-        new_mouse_rect = _clamp_rect(
-            float(new_rect_cfg.get("x", 0.0) or 0.0),
-            float(new_rect_cfg.get("y", 0.0) or 0.0),
-            float(new_rect_cfg.get("width", 1.0) or 1.0),
-            float(new_rect_cfg.get("height", 1.0) or 1.0),
-        )
-        new_mouse_left_binding, new_mouse_left_label = _read_mouse_binding(
-            "left_click_binding",
+        new_mouse_settings = build_mouse_control_settings(
             new_mouse_cfg,
             new_hands,
             new_dominant_side,
             new_support_side,
+            new_mode_triggers.get("mouse"),
         )
-        new_mouse_right_binding, new_mouse_right_label = _read_mouse_binding(
-            "right_click_binding",
-            new_mouse_cfg,
-            new_hands,
-            new_dominant_side,
-            new_support_side,
-        )
-
-        new_scroll_cfg = new_mouse_cfg.get("scroll", {}) or {}
-        new_scroll_enabled = bool(new_scroll_cfg.get("enabled", True))
-        new_scroll_side = resolve_side(new_scroll_cfg.get("hand", "RIGHT"), new_hands)
-        if new_scroll_side not in ("RIGHT", "LEFT"):
-            new_scroll_side = "RIGHT"
-        new_scroll_gesture = str(new_scroll_cfg.get("gesture", "FIST")).upper()
-        new_scroll_landmark = int(new_scroll_cfg.get("landmark", WRIST))
-        new_scroll_speed = float(new_scroll_cfg.get("speed", 1200.0))
-        new_scroll_deadzone = float(new_scroll_cfg.get("deadzone", 0.01))
-        new_scroll_interval_ms = int(new_scroll_cfg.get("interval_ms", 30))
-        new_scroll_label = binding_notation(
-            {"hand": new_scroll_side, "gesture": new_scroll_gesture},
-            new_dominant_side,
-            new_support_side,
-        )
-        new_mouse_active_hint = new_mouse_cfg.get("active_hint")
-        if not new_mouse_active_hint:
-            new_trig_label = trigger_label(
-                new_mode_triggers.get("mouse"),
-                new_dominant_side,
-                new_support_side,
-            )
-            new_pointer_hint = binding_notation(
-                {"hand": new_pointer_side, "gesture": "PINCH"},
-                new_dominant_side,
-                new_support_side,
-            )
-            new_base_mouse_hint = (
-                f"CURSOR: {new_pointer_hint} | "
-                f"LMB: {new_mouse_left_label} | RMB: {new_mouse_right_label}"
-            )
-            if new_scroll_enabled:
-                new_base_mouse_hint = (
-                    f"{new_base_mouse_hint} | SCROLL: {new_scroll_label}"
-                )
-            new_mouse_active_hint = (
-                f"{new_trig_label} | {new_base_mouse_hint}"
-                if new_trig_label
-                else new_base_mouse_hint
-            )
+        new_mouse_enabled = new_mouse_settings.enabled
+        new_mouse_status_label = new_mouse_settings.status_label
+        new_mouse_smooth = new_mouse_settings.smoothing_alpha
+        new_pointer_side = new_mouse_settings.pointer_side
+        new_pointer_landmark = new_mouse_settings.pointer_landmark
+        new_mouse_rect = new_mouse_settings.rect
+        new_mouse_left_binding = new_mouse_settings.left_binding
+        new_mouse_left_label = new_mouse_settings.left_label
+        new_mouse_right_binding = new_mouse_settings.right_binding
+        new_mouse_right_label = new_mouse_settings.right_label
+        new_scroll_enabled = new_mouse_settings.scroll_enabled
+        new_scroll_side = new_mouse_settings.scroll_side
+        new_scroll_gesture = new_mouse_settings.scroll_gesture
+        new_scroll_landmark = new_mouse_settings.scroll_landmark
+        new_scroll_speed = new_mouse_settings.scroll_speed
+        new_scroll_deadzone = new_mouse_settings.scroll_deadzone
+        new_scroll_interval_ms = new_mouse_settings.scroll_interval_ms
+        new_scroll_label = new_mouse_settings.scroll_label
+        new_mouse_active_hint = new_mouse_settings.active_hint
 
         new_hand_windows_cfg = (cfg.get("ui", {}) or {}).get("hand_windows", {}) or {}
         new_hand_windows_enabled = bool(new_hand_windows_cfg.get("enabled", False))
@@ -1045,7 +873,6 @@ def main():
         one_status_label = new_one_status_label
         one_active_hint = new_one_active_hint
 
-        mouse_cfg = new_mouse_cfg
         mouse_enabled = new_mouse_enabled
         mouse_status_label = new_mouse_status_label
         mouse_smooth = new_mouse_smooth
@@ -1092,12 +919,7 @@ def main():
             mouse_prev = None
             scroll_prev_y = None
             scroll_last_ms = now_ms
-            if mouse_left_down:
-                mouse_release("left")
-                mouse_left_down = False
-            if mouse_right_down:
-                mouse_release("right")
-                mouse_right_down = False
+            _release_mouse_buttons()
 
         if current_mode == "mouse" and not mouse_enabled:
             switch_mode("idle", now_ms, force_reset=True)
@@ -1344,48 +1166,27 @@ def main():
         support_event = evR if support_side == "RIGHT" else evL
 
         def _trigger_fired(trigger: dict | None) -> bool:
-            nonlocal both_pose_latched
-            if not trigger:
-                return False
-            gesture = trigger.get("gesture")
-            hand = trigger.get("hand")
-            if not gesture:
-                return False
-            hand = str(hand or "").upper()
-            if not hand:
-                return False
-            if hand == "BOTH":
-                active = bool(
-                    right
-                    and left
-                    and gR.pose_flags.get(gesture, False)
-                    and gL.pose_flags.get(gesture, False)
-                )
-                if not active:
-                    both_pose_latched[gesture] = False
-                    return False
-                if both_pose_latched.get(gesture):
-                    return False
-                both_pose_latched[gesture] = True
-                return True
-            if hand in ("EITHER", "ANY"):
-                return (evR == gesture) or (evL == gesture)
-            if hand == "RIGHT":
-                return evR == gesture
-            if hand == "LEFT":
-                return evL == gesture
-            if hand == dominant_side:
-                return dom_event == gesture
-            if hand == support_side:
-                return support_event == gesture
-            return False
+            return trigger_fired(
+                trigger,
+                dominant_side=dominant_side,
+                support_side=support_side,
+                g_right=gR,
+                g_left=gL,
+                right_present=bool(right),
+                left_present=bool(left),
+                event_right=evR,
+                event_left=evL,
+                dominant_event=dom_event,
+                support_event=support_event,
+                both_pose_latched=both_pose_latched,
+            )
 
         time_since_change = now_ms - mode_last_change_ms
 
         exit_binding = mode_triggers.get("exit")
         exit_active = False
         if exit_binding:
-            exit_active = _binding_active(
+            exit_active = binding_active(
                 exit_binding,
                 dominant_side,
                 support_side,
@@ -1419,12 +1220,7 @@ def main():
 
         if current_mode != "mouse" or eval_session.active:
             mouse_prev = None
-            if mouse_left_down:
-                mouse_release("left")
-                mouse_left_down = False
-            if mouse_right_down:
-                mouse_release("right")
-                mouse_right_down = False
+            _release_mouse_buttons()
 
         if one_hand_active and not seq_active and not mouse_active and not eval_session.active:
             dispatch = one_hand_dispatcher.update(
@@ -1468,7 +1264,7 @@ def main():
                 my = max(0.0, min(1.0, smoothed[1]))
                 mouse_prev = (mx, my)
                 mouse_move_normalized(mx, my)
-                left_active = _binding_active(
+                left_active = binding_active(
                     mouse_left_binding,
                     dominant_side,
                     support_side,
@@ -1479,7 +1275,7 @@ def main():
                     evR,
                     evL,
                 )
-                right_active = _binding_active(
+                right_active = binding_active(
                     mouse_right_binding,
                     dominant_side,
                     support_side,
@@ -1503,12 +1299,7 @@ def main():
                     mouse_release("right")
                     mouse_right_down = False
             else:
-                if mouse_left_down:
-                    mouse_release("left")
-                    mouse_left_down = False
-                if mouse_right_down:
-                    mouse_release("right")
-                    mouse_right_down = False
+                _release_mouse_buttons()
 
             scroll_source = right if scroll_side == "RIGHT" else left
             scroll_state = gR if scroll_side == "RIGHT" else gL
@@ -1709,10 +1500,7 @@ def main():
         if raw_key == 27 or key == 27:
             break
         if calibration.enabled and key != -1:
-            try:
-                key_chr = chr(key).lower()
-            except ValueError:
-                key_chr = ""
+            key_chr = chr(key).lower()
             if key_chr == calibration.trigger_key:
                 switch_mode("calibrate", now_ms, force_reset=True)
 

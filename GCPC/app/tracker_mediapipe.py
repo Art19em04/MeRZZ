@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import sys
 import time
 from pathlib import Path
 
 from app.utils.config import ROOT
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _clamp01(value: float) -> float:
@@ -23,12 +26,14 @@ def _resolve_legacy_hands_api():
 
         return mp_solutions.hands, errors
     except Exception as exc:
+        LOGGER.debug("Failed to import mediapipe.solutions via package attribute", exc_info=True)
         errors.append(f"from mediapipe import solutions failed: {exc!r}")
 
     try:
         solutions_mod = importlib.import_module("mediapipe.solutions")
         return solutions_mod.hands, errors
     except Exception as exc:
+        LOGGER.debug("Failed to import mediapipe.solutions module directly", exc_info=True)
         errors.append(f"import mediapipe.solutions failed: {exc!r}")
 
     return None, errors
@@ -105,6 +110,7 @@ class MediaPipeHandTracker:
             self.hands = None
             return
         except Exception as exc:
+            LOGGER.debug("Failed to initialize MediaPipe Tasks backend", exc_info=True)
             task_errors.append(f"mediapipe tasks init failed: {exc!r}")
 
         version = getattr(mp, "__version__", "unknown")
