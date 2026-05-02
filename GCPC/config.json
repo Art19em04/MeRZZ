@@ -117,7 +117,7 @@
   },
   "__comment_ui": "--------USER INTERFACE / SHORTCUTS---------",
   "ui": {
-    "developer_mode": true,
+    "developer_mode": false,
     "controls_panel": {
       "enabled": false,
       "start_scenario_shortcut": "s",
