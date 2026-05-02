@@ -146,7 +146,7 @@ class GestureSettingsDialog(QtWidgets.QDialog):
         self._build_calibration_group(content_layout)
 
         note = QtWidgets.QLabel(
-            "Saved to config.json. Restart GCPC to apply all runtime changes."
+            "Saved to config.json and applied to the running session where possible."
         )
         note.setWordWrap(True)
         content_layout.addWidget(note)

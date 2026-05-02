@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
+import copy
 import logging
 import statistics
 import time
 import uuid
-from typing import Dict, List
+from typing import Any, Dict, List, Mapping
 
 import cv2
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -117,6 +118,47 @@ def _binding_active(
     return False
 
 
+def _clamp_rect(x: float, y: float, w_rect: float, h_rect: float):
+    x = max(0.0, min(1.0, x))
+    y = max(0.0, min(1.0, y))
+    w_rect = max(1e-4, min(1.0 - x, w_rect))
+    h_rect = max(1e-4, min(1.0 - y, h_rect))
+    return {"x": x, "y": y, "w": w_rect, "h": h_rect}
+
+
+def _build_mode_triggers(
+    functional_raw: Mapping[str, Any],
+    hands: Mapping[str, str],
+) -> tuple[int, int, Dict[str, dict | None]]:
+    mode_refractory_ms = int(functional_raw.get("refractory_ms", 800))
+    exit_hold_ms = int(functional_raw.get("exit_hold_ms", 500))
+    mode_triggers: Dict[str, dict | None] = {}
+
+    for raw_key, combo in functional_raw.items():
+        if not isinstance(combo, str) or not combo.startswith("MODE_"):
+            continue
+        parsed = parse_mapping_key(raw_key, dict(hands))
+        if not parsed:
+            raise ValueError(f"[GESTURE] bad functional mapping key: {raw_key!r}")
+        side, gestures = parsed
+        if not gestures:
+            raise ValueError(f"[GESTURE] empty gestures for key: {raw_key!r}")
+        binding = {"hand": side, "gesture": gestures[0]}
+        if combo == "MODE_ONE_HAND":
+            mode_triggers["one_hand"] = binding
+        elif combo == "MODE_RECORD":
+            mode_triggers["record"] = binding
+        elif combo == "MODE_MOUSE":
+            mode_triggers["mouse"] = binding
+        elif combo == "MODE_EXIT":
+            mode_triggers["exit"] = binding
+        elif combo == "MODE_CALIBRATE":
+            mode_triggers["calibrate"] = binding
+
+    mode_triggers.setdefault("calibrate", None)
+    return mode_refractory_ms, exit_hold_ms, mode_triggers
+
+
 def main():
     cfg = load_config()
     LOGGER.info("Starting GCPC application")
@@ -193,6 +235,7 @@ def main():
     def _open_settings():
         nonlocal calibration_requested_from_ui
         dialog_parent = panel if panel else osd
+        previous_cfg = copy.deepcopy(cfg)
 
         def _request_calibration():
             nonlocal calibration_requested_from_ui
@@ -206,19 +249,29 @@ def main():
             )
             if dialog.exec() != QtWidgets.QDialog.Accepted:
                 return
+            restart_notes = _apply_runtime_settings(int(time.time() * 1000))
             save_config(cfg)
-            LOGGER.info("Gesture settings saved to config.json")
+            LOGGER.info("Gesture settings saved to config.json and applied live")
+            message = "Gesture settings were saved and applied immediately."
+            if restart_notes:
+                message += "\nRestart GCPC to apply: " + ", ".join(restart_notes)
             QtWidgets.QMessageBox.information(
                 dialog_parent,
                 "Settings saved",
-                "Gesture settings were saved to config.json.\nRestart GCPC to apply all runtime changes.",
+                message,
             )
         except Exception:
+            cfg.clear()
+            cfg.update(previous_cfg)
+            try:
+                _apply_runtime_settings(int(time.time() * 1000))
+            except Exception:
+                LOGGER.exception("Failed to restore runtime settings after settings error")
             LOGGER.exception("Failed to save gesture settings")
             QtWidgets.QMessageBox.critical(
                 dialog_parent,
                 "Settings error",
-                "Could not save gesture settings. Check logs/gcpc.log for details.",
+                "Could not apply or save gesture settings. Check logs/gcpc.log for details.",
             )
 
     session_id = uuid.uuid4().hex
@@ -476,32 +529,10 @@ def main():
     single_map_raw = cmd_map.get("single_gestures") or {}
     complex_map_raw = cmd_map.get("complex_gestures") or {}
     functional_raw = cmd_map.get("functional") or {}
-    mode_refractory_ms = int(functional_raw.get("refractory_ms", 800))
-    exit_hold_ms = int(functional_raw.get("exit_hold_ms", 500))
-    mode_triggers = {}
-
-    for raw_key, combo in functional_raw.items():
-        if not isinstance(combo, str) or not combo.startswith("MODE_"):
-            continue
-        parsed = parse_mapping_key(raw_key, hands)
-        if not parsed:
-            raise ValueError(f"[GESTURE] bad functional mapping key: {raw_key!r}")
-        side, gestures = parsed
-        if not gestures:
-            raise ValueError(f"[GESTURE] empty gestures for key: {raw_key!r}")
-        binding = {"hand": side, "gesture": gestures[0]}
-        if combo == "MODE_ONE_HAND":
-            mode_triggers["one_hand"] = binding
-        elif combo == "MODE_RECORD":
-            mode_triggers["record"] = binding
-        elif combo == "MODE_MOUSE":
-            mode_triggers["mouse"] = binding
-        elif combo == "MODE_EXIT":
-            mode_triggers["exit"] = binding
-        elif combo == "MODE_CALIBRATE":
-            mode_triggers["calibrate"] = binding
-
-    mode_triggers.setdefault("calibrate", None)
+    mode_refractory_ms, exit_hold_ms, mode_triggers = _build_mode_triggers(
+        functional_raw,
+        hands,
+    )
     single_map = build_single_map(single_map_raw, hands)
     one_hand_dispatcher = OneHandCommandDispatcher(
         single_map_raw,
@@ -541,22 +572,24 @@ def main():
     rect_y = float(rect_cfg.get("y", 0.0) or 0.0)
     rect_w = float(rect_cfg.get("width", 1.0) or 1.0)
     rect_h = float(rect_cfg.get("height", 1.0) or 1.0)
-
-    def _clamp_rect(x: float, y: float, w_rect: float, h_rect: float):
-        x = max(0.0, min(1.0, x))
-        y = max(0.0, min(1.0, y))
-        w_rect = max(1e-4, min(1.0 - x, w_rect))
-        h_rect = max(1e-4, min(1.0 - y, h_rect))
-        return {"x": x, "y": y, "w": w_rect, "h": h_rect}
-
     mouse_rect = _clamp_rect(rect_x, rect_y, rect_w, rect_h)
 
-    def _read_mouse_binding(key: str):
-        raw_value = mouse_cfg.get(key)
-        binding = parse_single_binding(raw_value, hands)
+    def _read_mouse_binding(
+        key: str,
+        source_cfg: Mapping[str, Any] | None = None,
+        source_hands: Mapping[str, str] | None = None,
+        source_dominant_side: str | None = None,
+        source_support_side: str | None = None,
+    ):
+        binding_cfg = source_cfg if source_cfg is not None else mouse_cfg
+        binding_hands = dict(source_hands if source_hands is not None else hands)
+        binding_dominant = source_dominant_side or dominant_side
+        binding_support = source_support_side or support_side
+        raw_value = binding_cfg.get(key)
+        binding = parse_single_binding(raw_value, binding_hands)
         gesture = binding.get("gesture") or ""
         binding["gesture"] = str(gesture).upper()
-        label = binding_notation(binding, dominant_side, support_side)
+        label = binding_notation(binding, binding_dominant, binding_support)
         return binding, label
 
     mouse_left_binding, mouse_left_label = _read_mouse_binding("left_click_binding")
@@ -679,6 +712,396 @@ def main():
             "calibrate": "CALIBRATION",
         }
         print(f"[MODE] -> {labels.get(new_mode, new_mode.upper())}")
+
+    def _apply_runtime_settings(now_ms: int) -> list[str]:
+        nonlocal hands, dominant_side, support_side, dominant_is_right, eval_session
+        nonlocal arm_delay_ms, refractory_ms, cancel_exit_ms, max_len
+        nonlocal seq_input_side, candidate_ignore
+        nonlocal confirm_hand, confirm_gesture, confirm_deb
+        nonlocal undo_hand, undo_steps, undo_start, undo_end, undo_window_ms
+        nonlocal commit_hand, commit_gesture, commit_deb
+        nonlocal single_map_raw, complex_map_raw, functional_raw
+        nonlocal mode_refractory_ms, exit_hold_ms, mode_triggers
+        nonlocal single_map, one_hand_dispatcher, seq_map
+        nonlocal one_enabled, one_status_label, one_active_hint
+        nonlocal mouse_cfg, mouse_enabled, mouse_status_label, mouse_smooth
+        nonlocal pointer_side, pointer_landmark, mouse_rect
+        nonlocal mouse_left_binding, mouse_left_label
+        nonlocal mouse_right_binding, mouse_right_label
+        nonlocal scroll_enabled, scroll_side, scroll_gesture, scroll_landmark
+        nonlocal scroll_speed, scroll_deadzone, scroll_interval_ms, scroll_label
+        nonlocal mouse_active_hint, mouse_prev, mouse_left_down, mouse_right_down
+        nonlocal scroll_prev_y, scroll_last_ms
+        nonlocal seq_buffer, seq_pending, last_seq_event_ms, last_evt_ms, last_sent_ms
+        nonlocal undo_open_ts, last_R_label, last_L_label, last_single_action
+        nonlocal both_pose_latched, exit_hold_since
+        nonlocal hand_windows_enabled, hand_window_size, hand_window_padding
+        nonlocal hand_window_margin, show_full_camera, hand_windows_placed
+
+        previous_hands = (dominant_side, support_side)
+        previous_mode_triggers = mode_triggers
+        previous_single_map_raw = single_map_raw
+        previous_complex_map_raw = complex_map_raw
+        previous_mouse_enabled = mouse_enabled
+        previous_pointer_side = pointer_side
+        previous_pointer_landmark = pointer_landmark
+        previous_mouse_rect = dict(mouse_rect)
+        previous_mouse_left_binding = dict(mouse_left_binding)
+        previous_mouse_right_binding = dict(mouse_right_binding)
+        previous_scroll_state = (
+            scroll_enabled,
+            scroll_side,
+            scroll_gesture,
+            scroll_landmark,
+            scroll_speed,
+            scroll_deadzone,
+            scroll_interval_ms,
+        )
+        previous_hand_window_state = (
+            hand_windows_enabled,
+            hand_window_size,
+            hand_window_padding,
+            hand_window_margin,
+            show_full_camera,
+        )
+
+        new_hands = build_hands(cfg)
+        new_dominant_side = new_hands["dominant"]
+        new_support_side = new_hands["support"]
+        new_dominant_is_right = new_dominant_side == "RIGHT"
+
+        new_seq_cfg = cfg.get("sequence", {}) or {}
+        new_arm_delay_ms = int(new_seq_cfg.get("arm_delay_ms", 420))
+        new_refractory_ms = int(new_seq_cfg.get("refractory_ms", 1100))
+        new_cancel_exit_ms = int(new_seq_cfg.get("cancel_on_hand_exit_ms", 900))
+        new_max_len = int(new_seq_cfg.get("max_len", 6))
+
+        new_controls_cfg = cfg.get("controls", {}) or {}
+        new_seq_ctrl = new_controls_cfg.get("sequence", {}) or {}
+        new_seq_input_side = resolve_side(
+            new_seq_ctrl.get("input_hand", "dominant"),
+            new_hands,
+        )
+        new_candidate_ignore = {
+            str(gesture).upper()
+            for gesture in new_seq_ctrl.get("candidate_ignore", [])
+        }
+
+        new_confirm_cfg = new_seq_ctrl.get("confirm") or {}
+        new_confirm_binding_value = (
+            new_confirm_cfg.get("binding")
+            if isinstance(new_confirm_cfg, dict)
+            else new_confirm_cfg
+        )
+        new_confirm_options = (
+            new_confirm_cfg if isinstance(new_confirm_cfg, dict) else {}
+        )
+        new_confirm_binding = parse_single_binding(
+            new_confirm_binding_value,
+            new_hands,
+        )
+        new_confirm_deb = DebouncedTrigger(
+            int(new_confirm_options.get("dwell_ms", 220)),
+            int(new_confirm_options.get("refractory_ms", 700)),
+        )
+
+        new_undo_cfg = new_seq_ctrl.get("undo") or {}
+        new_undo_binding_value = (
+            new_undo_cfg.get("binding") if isinstance(new_undo_cfg, dict) else new_undo_cfg
+        )
+        new_undo_options = new_undo_cfg if isinstance(new_undo_cfg, dict) else {}
+        new_undo_binding = parse_sequence_binding(new_undo_binding_value, new_hands)
+        new_undo_steps = new_undo_binding["gestures"]
+        new_undo_start = new_undo_steps[0]
+        new_undo_end = (
+            new_undo_steps[-1] if len(new_undo_steps) > 1 else new_undo_steps[0]
+        )
+
+        new_commit_cfg = new_seq_ctrl.get("commit") or {}
+        new_commit_binding_value = (
+            new_commit_cfg.get("binding")
+            if isinstance(new_commit_cfg, dict)
+            else new_commit_cfg
+        )
+        new_commit_options = new_commit_cfg if isinstance(new_commit_cfg, dict) else {}
+        new_commit_binding = parse_single_binding(new_commit_binding_value, new_hands)
+        new_commit_deb = DebouncedTrigger(
+            int(new_commit_options.get("dwell_ms", 260)),
+            int(new_commit_options.get("refractory_ms", 1200)),
+        )
+
+        new_cmd_map = cfg.get("command_mappings") or {}
+        new_single_map_raw = new_cmd_map.get("single_gestures") or {}
+        new_complex_map_raw = new_cmd_map.get("complex_gestures") or {}
+        new_functional_raw = new_cmd_map.get("functional") or {}
+        (
+            new_mode_refractory_ms,
+            new_exit_hold_ms,
+            new_mode_triggers,
+        ) = _build_mode_triggers(new_functional_raw, new_hands)
+        new_single_map = build_single_map(new_single_map_raw, new_hands)
+        new_one_hand_dispatcher = OneHandCommandDispatcher(
+            new_single_map_raw,
+            new_hands,
+            refractory_ms=new_refractory_ms,
+        )
+        new_seq_map = build_sequence_map(new_complex_map_raw, new_hands)
+        merge_single_into_sequences(new_seq_map, new_single_map)
+
+        new_one_cfg = cfg.get("one_hand_mode", {}) or {}
+        new_one_enabled = bool(new_one_cfg.get("enabled", True))
+        new_one_status_label = str(new_one_cfg.get("status_label", "ONE-HAND"))
+        new_func = (cfg.get("command_mappings", {}) or {}).get("functional", {}) or {}
+        new_exit_gesture = next(
+            (gesture for gesture, cmd in new_func.items() if cmd == "MODE_EXIT"),
+            None,
+        )
+        new_base_hint = new_one_cfg.get("active_hint") or ""
+        new_exit_hint = f"To exit mode: {new_exit_gesture}" if new_exit_gesture else ""
+        if new_base_hint and new_exit_hint:
+            new_one_active_hint = f"{new_base_hint} | {new_exit_hint}"
+        elif new_base_hint:
+            new_one_active_hint = new_base_hint
+        else:
+            new_action_hint = new_one_hand_dispatcher.hint()
+            new_one_active_hint = (
+                f"{new_action_hint} | {new_exit_hint}"
+                if new_exit_hint
+                else new_action_hint
+            )
+
+        new_mouse_cfg = cfg.get("mouse_control", {}) or {}
+        new_mouse_enabled = bool(new_mouse_cfg.get("enabled", False))
+        new_mouse_status_label = str(new_mouse_cfg.get("status_label", "MOUSE"))
+        new_mouse_smooth = max(
+            0.0,
+            min(1.0, float(new_mouse_cfg.get("smoothing_alpha", 0.25))),
+        )
+        new_pointer_side = resolve_side(new_mouse_cfg.get("pointer_hand"), new_hands)
+        if new_pointer_side not in ("RIGHT", "LEFT"):
+            new_pointer_side = new_dominant_side
+        new_pointer_landmark = int(new_mouse_cfg.get("pointer_landmark", 8))
+
+        new_rect_cfg = new_mouse_cfg.get("control_rect", {}) or {}
+        new_mouse_rect = _clamp_rect(
+            float(new_rect_cfg.get("x", 0.0) or 0.0),
+            float(new_rect_cfg.get("y", 0.0) or 0.0),
+            float(new_rect_cfg.get("width", 1.0) or 1.0),
+            float(new_rect_cfg.get("height", 1.0) or 1.0),
+        )
+        new_mouse_left_binding, new_mouse_left_label = _read_mouse_binding(
+            "left_click_binding",
+            new_mouse_cfg,
+            new_hands,
+            new_dominant_side,
+            new_support_side,
+        )
+        new_mouse_right_binding, new_mouse_right_label = _read_mouse_binding(
+            "right_click_binding",
+            new_mouse_cfg,
+            new_hands,
+            new_dominant_side,
+            new_support_side,
+        )
+
+        new_scroll_cfg = new_mouse_cfg.get("scroll", {}) or {}
+        new_scroll_enabled = bool(new_scroll_cfg.get("enabled", True))
+        new_scroll_side = resolve_side(new_scroll_cfg.get("hand", "RIGHT"), new_hands)
+        if new_scroll_side not in ("RIGHT", "LEFT"):
+            new_scroll_side = "RIGHT"
+        new_scroll_gesture = str(new_scroll_cfg.get("gesture", "FIST")).upper()
+        new_scroll_landmark = int(new_scroll_cfg.get("landmark", WRIST))
+        new_scroll_speed = float(new_scroll_cfg.get("speed", 1200.0))
+        new_scroll_deadzone = float(new_scroll_cfg.get("deadzone", 0.01))
+        new_scroll_interval_ms = int(new_scroll_cfg.get("interval_ms", 30))
+        new_scroll_label = binding_notation(
+            {"hand": new_scroll_side, "gesture": new_scroll_gesture},
+            new_dominant_side,
+            new_support_side,
+        )
+        new_mouse_active_hint = new_mouse_cfg.get("active_hint")
+        if not new_mouse_active_hint:
+            new_trig_label = trigger_label(
+                new_mode_triggers.get("mouse"),
+                new_dominant_side,
+                new_support_side,
+            )
+            new_pointer_hint = binding_notation(
+                {"hand": new_pointer_side, "gesture": "PINCH"},
+                new_dominant_side,
+                new_support_side,
+            )
+            new_base_mouse_hint = (
+                f"CURSOR: {new_pointer_hint} | "
+                f"LMB: {new_mouse_left_label} | RMB: {new_mouse_right_label}"
+            )
+            if new_scroll_enabled:
+                new_base_mouse_hint = (
+                    f"{new_base_mouse_hint} | SCROLL: {new_scroll_label}"
+                )
+            new_mouse_active_hint = (
+                f"{new_trig_label} | {new_base_mouse_hint}"
+                if new_trig_label
+                else new_base_mouse_hint
+            )
+
+        new_hand_windows_cfg = (cfg.get("ui", {}) or {}).get("hand_windows", {}) or {}
+        new_hand_windows_enabled = bool(new_hand_windows_cfg.get("enabled", False))
+        new_hand_window_size = int(new_hand_windows_cfg.get("size", 220))
+        new_hand_window_padding = float(new_hand_windows_cfg.get("padding", 0.2))
+        new_hand_window_margin = int(new_hand_windows_cfg.get("margin_px", 16))
+        new_show_full_camera = bool(new_hand_windows_cfg.get("show_full_camera", True))
+
+        hand_roles_changed = previous_hands != (new_dominant_side, new_support_side)
+        binding_settings_changed = (
+            previous_mode_triggers != new_mode_triggers
+            or previous_single_map_raw != new_single_map_raw
+            or previous_complex_map_raw != new_complex_map_raw
+            or seq_input_side != new_seq_input_side
+            or confirm_hand != new_confirm_binding["hand"]
+            or confirm_gesture != new_confirm_binding["gesture"]
+            or undo_hand != new_undo_binding["hand"]
+            or undo_steps != new_undo_steps
+            or commit_hand != new_commit_binding["hand"]
+            or commit_gesture != new_commit_binding["gesture"]
+        )
+        mouse_settings_changed = (
+            previous_mouse_enabled != new_mouse_enabled
+            or previous_pointer_side != new_pointer_side
+            or previous_pointer_landmark != new_pointer_landmark
+            or previous_mouse_rect != new_mouse_rect
+            or previous_mouse_left_binding != new_mouse_left_binding
+            or previous_mouse_right_binding != new_mouse_right_binding
+            or previous_scroll_state
+            != (
+                new_scroll_enabled,
+                new_scroll_side,
+                new_scroll_gesture,
+                new_scroll_landmark,
+                new_scroll_speed,
+                new_scroll_deadzone,
+                new_scroll_interval_ms,
+            )
+        )
+        hand_window_state_changed = previous_hand_window_state != (
+            new_hand_windows_enabled,
+            new_hand_window_size,
+            new_hand_window_padding,
+            new_hand_window_margin,
+            new_show_full_camera,
+        )
+
+        hands = new_hands
+        dominant_side = new_dominant_side
+        support_side = new_support_side
+        dominant_is_right = new_dominant_is_right
+        if eval_session.active:
+            eval_session.reconfigure_hands(cfg, hands)
+        else:
+            eval_session = EvalSingleSession(cfg, hands, panel=panel)
+
+        gR.cfg = cfg.get("gesture_engine", {}) or {}
+        gL.cfg = cfg.get("gesture_engine", {}) or {}
+
+        arm_delay_ms = new_arm_delay_ms
+        refractory_ms = new_refractory_ms
+        cancel_exit_ms = new_cancel_exit_ms
+        max_len = new_max_len
+        seq_input_side = new_seq_input_side
+        candidate_ignore = new_candidate_ignore
+        confirm_hand = new_confirm_binding["hand"]
+        confirm_gesture = new_confirm_binding["gesture"]
+        confirm_deb = new_confirm_deb
+        undo_hand = new_undo_binding["hand"]
+        undo_steps = new_undo_steps
+        undo_start = new_undo_start
+        undo_end = new_undo_end
+        undo_window_ms = int(new_undo_options.get("window_ms", 900))
+        commit_hand = new_commit_binding["hand"]
+        commit_gesture = new_commit_binding["gesture"]
+        commit_deb = new_commit_deb
+        single_map_raw = new_single_map_raw
+        complex_map_raw = new_complex_map_raw
+        functional_raw = new_functional_raw
+        mode_refractory_ms = new_mode_refractory_ms
+        exit_hold_ms = new_exit_hold_ms
+        mode_triggers = new_mode_triggers
+        single_map = new_single_map
+        one_hand_dispatcher = new_one_hand_dispatcher
+        seq_map = new_seq_map
+        one_enabled = new_one_enabled
+        one_status_label = new_one_status_label
+        one_active_hint = new_one_active_hint
+
+        mouse_cfg = new_mouse_cfg
+        mouse_enabled = new_mouse_enabled
+        mouse_status_label = new_mouse_status_label
+        mouse_smooth = new_mouse_smooth
+        pointer_side = new_pointer_side
+        pointer_landmark = new_pointer_landmark
+        mouse_rect = new_mouse_rect
+        mouse_left_binding = new_mouse_left_binding
+        mouse_left_label = new_mouse_left_label
+        mouse_right_binding = new_mouse_right_binding
+        mouse_right_label = new_mouse_right_label
+        scroll_enabled = new_scroll_enabled
+        scroll_side = new_scroll_side
+        scroll_gesture = new_scroll_gesture
+        scroll_landmark = new_scroll_landmark
+        scroll_speed = new_scroll_speed
+        scroll_deadzone = new_scroll_deadzone
+        scroll_interval_ms = new_scroll_interval_ms
+        scroll_label = new_scroll_label
+        mouse_active_hint = new_mouse_active_hint
+
+        hand_windows_enabled = new_hand_windows_enabled
+        hand_window_size = new_hand_window_size
+        hand_window_padding = new_hand_window_padding
+        hand_window_margin = new_hand_window_margin
+        show_full_camera = new_show_full_camera
+
+        if hand_roles_changed or binding_settings_changed:
+            seq_buffer.clear()
+            seq_pending = None
+            last_seq_event_ms = now_ms
+            last_evt_ms = now_ms
+            last_sent_ms = now_ms
+            undo_open_ts = {"RIGHT": None, "LEFT": None}
+            both_pose_latched.clear()
+            exit_hold_since = None
+            last_R_label = ""
+            last_L_label = ""
+            last_single_action = ""
+            gR.pose_flags.clear()
+            gL.pose_flags.clear()
+            one_hand_dispatcher.reset(now_ms)
+
+        if mouse_settings_changed:
+            mouse_prev = None
+            scroll_prev_y = None
+            scroll_last_ms = now_ms
+            if mouse_left_down:
+                mouse_release("left")
+                mouse_left_down = False
+            if mouse_right_down:
+                mouse_release("right")
+                mouse_right_down = False
+
+        if current_mode == "mouse" and not mouse_enabled:
+            switch_mode("idle", now_ms, force_reset=True)
+        elif current_mode == "one_hand" and not one_enabled:
+            switch_mode("idle", now_ms, force_reset=True)
+        elif current_mode == "one_hand":
+            one_hand_dispatcher.reset(now_ms)
+
+        if hand_window_state_changed:
+            hand_windows_placed = False
+            _safe_destroy_window("GCPC - Left Hand")
+            _safe_destroy_window("GCPC - Right Hand")
+            if hand_windows_enabled and not show_full_camera:
+                _safe_destroy_window("GCPC - Camera")
+
+        return []
 
     fps = None
     last_frame_time = time.time()

@@ -141,7 +141,7 @@
       "BOTH-OPEN_PALM": "MODE_EXIT"
     },
     "complex_gestures": {
-      "DOMINANT-FIST > DOMINANT-FIST": "CTRL+SHIFT+N"
+      "DOMINANT-FIST > DOMINANT-PINCH": "CTRL+SHIFT+N"
     },
     "single_gestures": {
       "NON_DOMINANT-PINCH": "CTRL+C",

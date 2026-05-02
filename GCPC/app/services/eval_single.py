@@ -32,13 +32,9 @@ class EvalSingleSession:
         self.pass_accuracy = float(eval_cfg.get("pass_accuracy", 0.9))
         self.pass_wrong_max = int(eval_cfg.get("pass_wrong_max", 3))
 
-        hand_setting = resolve_side(eval_cfg.get("hand", "dominant"), hands)
-        if hand_setting not in ("RIGHT", "LEFT"):
-            hand_setting = resolve_side("dominant", hands)
-        self.hand_setting = hand_setting
-        self.hand_label = (
-            "dominant" if self.hand_setting == hands.get("dominant", "RIGHT") else "non_dominant"
-        )
+        self.hand_setting = "RIGHT"
+        self.hand_label = "dominant"
+        self.reconfigure_hands(cfg, hands)
 
         self.panel = panel
         self.active = False
@@ -52,6 +48,18 @@ class EvalSingleSession:
         self.hit_times: list[int] = []
         self.summary_rows: list[dict[str, str | float | int]] = []
         self.aborted = False
+
+    def reconfigure_hands(self, cfg: dict, hands: dict) -> None:
+        eval_cfg = cfg.get("eval_single", {})
+        hand_setting = resolve_side(eval_cfg.get("hand", "dominant"), hands)
+        if hand_setting not in ("RIGHT", "LEFT"):
+            hand_setting = resolve_side("dominant", hands)
+        self.hand_setting = hand_setting
+        self.hand_label = (
+            "dominant"
+            if self.hand_setting == hands.get("dominant", "RIGHT")
+            else "non_dominant"
+        )
 
     def current_target(self) -> str | None:
         if 0 <= self.gesture_idx < len(self.gestures):
